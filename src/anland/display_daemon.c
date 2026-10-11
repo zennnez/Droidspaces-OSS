@@ -164,7 +164,7 @@ static void handle_client_data(daemon_ctx *ctx, struct client *c) {
       struct screen_info si;
       memcpy(&si, payload, sizeof(si));
       /* Always accept the consumer's screen info, even if it differs from a
-       * previous connection — the Android display may have rotated or switched
+       * previous connection, as the Android display may have rotated or switched
        * resolution. Overwrite and forward to any waiting producer. */
       ctx->stored_screen = si;
       ctx->has_screen_info = true;
