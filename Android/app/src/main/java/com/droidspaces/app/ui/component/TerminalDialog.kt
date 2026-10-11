@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -98,16 +99,11 @@ fun TerminalDialog(
                     if (onClear != null) {
                         val canClear = logs.isNotEmpty() && !isBlocking
                         Surface(
+                            onClick = onClear,
+                            enabled = canClear,
                             modifier = Modifier
                                 .height(38.dp)
-                                .weight(1f)
-                                .clip(buttonShape)
-                                .clickable(
-                                    enabled = canClear,
-                                    onClick = onClear,
-                                    indication = ripple(bounded = true),
-                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-                                ),
+                                .weight(1f),
                             shape = buttonShape,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (canClear) 0.06f else 0.03f),
                             border = BorderStroke(1.dp, if (canClear) MaterialTheme.colorScheme.error.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
@@ -137,22 +133,17 @@ fun TerminalDialog(
 
                     val effectivelyCanCopy = logs.isNotEmpty() && !isBlocking
                     Surface(
+                        onClick = {
+                            val logText = logs.joinToString("\n") { AnsiColorParser.stripAnsi(it.second) }
+                            val clipboard = context.getSystemService(ClipboardManager::class.java)
+                            val clip = ClipData.newPlainText(context.getString(R.string.terminal_logs), logText)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, R.string.logs_copied, Toast.LENGTH_SHORT).show()
+                        },
+                        enabled = effectivelyCanCopy,
                         modifier = Modifier
                             .height(38.dp)
-                            .weight(1f)
-                            .clip(buttonShape)
-                            .clickable(
-                                enabled = effectivelyCanCopy,
-                                onClick = {
-                                    val logText = logs.joinToString("\n") { AnsiColorParser.stripAnsi(it.second) }
-                                    val clipboard = context.getSystemService(ClipboardManager::class.java)
-                                    val clip = ClipData.newPlainText(context.getString(R.string.terminal_logs), logText)
-                                    clipboard.setPrimaryClip(clip)
-                                    Toast.makeText(context, R.string.logs_copied, Toast.LENGTH_SHORT).show()
-                                },
-                                indication = ripple(bounded = true),
-                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-                            ),
+                            .weight(1f),
                         shape = buttonShape,
                         color = if (effectivelyCanCopy) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.03f),
                         border = BorderStroke(1.dp, if (effectivelyCanCopy) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),

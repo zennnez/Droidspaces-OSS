@@ -54,6 +54,60 @@ object ContainerUsersManager {
     fun getCachedUsers(containerName: String): List<String>? = cache[containerName]
 
     /**
+     * Delete a user and their home directory inside the container.
+     */
+    suspend fun deleteUser(containerName: String, username: String): Result<Unit> = withContext(Dispatchers.IO) {
+        if (username == "root") {
+            return@withContext Result.failure(IllegalArgumentException("Cannot delete root user"))
+        }
+        try {
+                val d = '$'
+                val script = """
+                    pkill -u "$username" 2>/dev/null || true
+                    if command -v userdel >/dev/null 2>&1; then
+                        userdel -r -f "$username" 2>&1 || userdel "$username" 2>&1
+                    elif command -v deluser >/dev/null 2>&1; then
+                        deluser --remove-home "$username" 2>&1 || deluser "$username" 2>&1
+                    else
+                        echo "Neither userdel nor deluser found in container" >&2
+                        exit 1
+                    fi
+                    # Reconfigure desktop services to the next available user
+                    nextUser="${d}(awk -F: '${d}3 >= 1000 && ${d}3 < 65534 {print ${d}1; exit}' /etc/passwd 2>/dev/null || echo "")"
+                    for srv in /etc/systemd/system/plasma-wayland.service /etc/systemd/system/plasma-mobile.service /etc/systemd/system/plasma-x11.service /etc/systemd/system/niri.service /etc/systemd/system/noctalia.service /etc/systemd/system/xfce-autostart.service /etc/systemd/system/*-autostart.service; do
+                        if [ -f "${d}srv" ]; then
+                            if [ -n "${d}nextUser" ]; then
+                                sed -i "s/^User=.*/User=${d}nextUser/" "${d}srv" 2>/dev/null || true
+                            else
+                                sed -i "s/^User=.*/User=root/" "${d}srv" 2>/dev/null || true
+                            fi
+                        fi
+                    done
+                    # Update SSH config if deleted user was in AllowUsers
+                    if [ -f /etc/ssh/sshd_config.d/99-droidspaces.conf ]; then
+                        if [ -n "${d}nextUser" ]; then
+                            sed -i "s/^AllowUsers .*/AllowUsers ${d}nextUser/" /etc/ssh/sshd_config.d/99-droidspaces.conf 2>/dev/null || true
+                        else
+                            sed -i '/^AllowUsers /d' /etc/ssh/sshd_config.d/99-droidspaces.conf 2>/dev/null || true
+                        fi
+                    fi
+                """.trimIndent()
+            val b64 = android.util.Base64.encodeToString(script.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val cmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(containerName)} run 'echo $b64 | base64 -d | sh'"
+            val res = Shell.cmd(cmd).exec()
+            clearCache(containerName)
+            if (res.isSuccess) {
+                Result.success(Unit)
+            } else {
+                val err = (res.err + res.out).joinToString("\n").trim()
+                Result.failure(Exception(err.ifBlank { "Failed to delete user $username" }))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Clear cache for a specific container or all containers.
      */
     fun clearCache(containerName: String? = null) {

@@ -1740,4 +1740,443 @@ EOF
             runningOperationContainer = null
         }
     }
+
+    suspend fun executeAddUser(
+        container: ContainerInfo,
+        username: String,
+        password: String,
+        grantSudo: Boolean,
+        shell: String = "/bin/bash",
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        runningOperationContainer = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            showLogViewerFor = container.name
+            logger.i("Adding user '$username' to container '${container.name}'...")
+
+            val cleanUser = username.trim()
+            val cleanShell = shell.trim().ifBlank { "/bin/bash" }
+
+            val scriptBuilder = StringBuilder()
+            scriptBuilder.appendLine("set -e")
+            scriptBuilder.appendLine("""
+                targetShell="$cleanShell"
+                if ! [ -x "${'$'}targetShell" ] && ! command -v "${'$'}targetShell" >/dev/null 2>&1; then
+                    pkgName="${'$'}(basename "${'$'}targetShell")"
+                    if command -v apt-get >/dev/null 2>&1; then
+                        DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+                        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${'$'}pkgName" >/dev/null 2>&1 || true
+                    elif command -v dnf >/dev/null 2>&1; then
+                        dnf install -y "${'$'}pkgName" >/dev/null 2>&1 || true
+                    elif command -v pacman >/dev/null 2>&1; then
+                        pacman -Sy --noconfirm "${'$'}pkgName" >/dev/null 2>&1 || true
+                    elif command -v apk >/dev/null 2>&1; then
+                        apk add --no-cache "${'$'}pkgName" >/dev/null 2>&1 || true
+                    fi
+                fi
+
+                if ! [ -x "${'$'}targetShell" ] && ! command -v "${'$'}targetShell" >/dev/null 2>&1; then
+                    targetShell="${'$'}(command -v bash 2>/dev/null || command -v sh 2>/dev/null || echo /bin/sh)"
+                fi
+
+                if command -v useradd >/dev/null 2>&1; then
+                    useradd -m -s "${'$'}targetShell" "$cleanUser" 2>&1 || useradd -s "${'$'}targetShell" "$cleanUser" 2>&1
+                elif command -v adduser >/dev/null 2>&1; then
+                    adduser -D -s "${'$'}targetShell" "$cleanUser" 2>&1 || adduser "$cleanUser" 2>&1
+                else
+                    echo "Neither useradd nor adduser found" >&2
+                    exit 1
+                fi
+            """.trimIndent())
+
+            if (password.isNotBlank()) {
+                val b64pwd = android.util.Base64.encodeToString("$cleanUser:$password".toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+                scriptBuilder.appendLine("""
+                    echo "$b64pwd" | base64 -d | chpasswd 2>&1 || echo "$cleanUser:$password" | chpasswd 2>&1
+                """.trimIndent())
+            }
+
+            // Android network, hardware, DRM, and GPU access groups (including shadow for lockscreen PAM)
+            scriptBuilder.appendLine("""
+                for grp in aid_inet aid_net_raw input video render droidspaces-gpu tty audio shadow aid_graphics aid_sdcard_rw aid_media_rw aid_everybody; do
+                    if getent group "${'$'}grp" >/dev/null 2>&1; then
+                        usermod -aG "${'$'}grp" "$cleanUser" 2>/dev/null || adduser "$cleanUser" "${'$'}grp" 2>/dev/null || gpasswd -a "$cleanUser" "${'$'}grp" 2>/dev/null || true
+                    fi
+                done
+            """.trimIndent())
+
+            if (grantSudo) {
+                scriptBuilder.appendLine("""
+                    for grp in sudo wheel admin; do
+                        if getent group "${'$'}grp" >/dev/null 2>&1; then
+                            usermod -aG "${'$'}grp" "$cleanUser" 2>&1 || adduser "$cleanUser" "${'$'}grp" 2>&1 || gpasswd -a "$cleanUser" "${'$'}grp" 2>&1 || true
+                            echo "Added $cleanUser to group ${'$'}grp"
+                        fi
+                    done
+                    if [ -d /etc/sudoers.d ]; then
+                        echo "$cleanUser ALL=(ALL) ALL" > "/etc/sudoers.d/90-$cleanUser"
+                        chmod 0440 "/etc/sudoers.d/90-$cleanUser"
+                    fi
+                """.trimIndent())
+            }
+
+            // Automatically re-assign desktop services to the new user
+            scriptBuilder.appendLine("""
+                for srv in /etc/systemd/system/plasma-wayland.service /etc/systemd/system/plasma-mobile.service /etc/systemd/system/plasma-x11.service /etc/systemd/system/niri.service /etc/systemd/system/noctalia.service /etc/systemd/system/xfce-autostart.service /etc/systemd/system/*-autostart.service; do
+                    if [ -f "${'$'}srv" ]; then
+                        sed -i "s/^User=.*/User=$cleanUser/" "${'$'}srv" 2>/dev/null || true
+                        echo "Configured $(basename "${'$'}srv") User=$cleanUser"
+                    fi
+                done
+                if command -v systemctl >/dev/null 2>&1; then
+                    systemctl daemon-reload 2>/dev/null || true
+                fi
+                # Update SSH config if 99-droidspaces.conf is present
+                if [ -f /etc/ssh/sshd_config.d/99-droidspaces.conf ]; then
+                    sed -i "s/^AllowUsers .*/AllowUsers $cleanUser/" /etc/ssh/sshd_config.d/99-droidspaces.conf 2>/dev/null || true
+                fi
+            """.trimIndent())
+
+            // Ensure user home startup files exist to prevent interactive shell wizards
+            scriptBuilder.appendLine("""
+                userHome="${'$'}(getent passwd "$cleanUser" | cut -d: -f6)"
+                if [ -n "${'$'}userHome" ] && [ -d "${'$'}userHome" ]; then
+                    touch "${'$'}userHome/.zshrc" 2>/dev/null || true
+                    touch "${'$'}userHome/.bashrc" 2>/dev/null || true
+                    mkdir -p "${'$'}userHome/.config" 2>/dev/null || true
+                    chown -R "$cleanUser:$cleanUser" "${'$'}userHome" 2>/dev/null || true
+                fi
+                mkdir -p /etc/zsh 2>/dev/null || true
+                touch /etc/zsh/zshrc 2>/dev/null || true
+            """.trimIndent())
+
+            scriptBuilder.appendLine("echo \"User '$cleanUser' created successfully.\"")
+
+            val b64Script = android.util.Base64.encodeToString(scriptBuilder.toString().toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val cmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} run 'echo $b64Script | base64 -d | sh'"
+
+            val success = ContainerOperationExecutor.executeCommand(
+                command = cmd,
+                operation = "add_user",
+                logger = logger,
+                skipHeader = true,
+                operationCompletedMessage = "User creation completed"
+            )
+
+            ContainerUsersManager.clearCache(container.name)
+
+            if (success) {
+                logger.i("User '$cleanUser' added successfully ✓")
+                onSuccess("User '$cleanUser' created successfully")
+            } else {
+                logger.e("Failed to create user '$cleanUser'")
+                onError("Failed to create user '$cleanUser'")
+            }
+
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error adding user: ${e.message}")
+            onError("Error creating user: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    // Packages & Dev Environment Operations
+    // ---------------------------------------------------------------------------
+    suspend fun executeInstallAllPackages(
+        container: ContainerInfo,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Install All Essential CLI, Zsh & Dev Runtimes ===")
+            val scriptContent = appContext.assets.open("packages_setup.sh").bufferedReader().use { it.readText() }
+                .replace("\r\n", "\n").replace("\r", "\n")
+            val b64 = android.util.Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val installCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run 'mkdir -p /usr/local/sbin && echo \"$b64\" | base64 -d > /usr/local/sbin/droidspaces-packages && " +
+                "chmod 755 /usr/local/sbin/droidspaces-packages && /usr/local/sbin/droidspaces-packages install-all'"
+
+            val success = ContainerOperationExecutor.executeCommand(installCmd, "install_all_packages", logger)
+            if (success) {
+                logger.i("All packages installed and configured successfully ✓")
+                onSuccess("All packages installed")
+            } else {
+                logger.e("Failed to install packages")
+                onError("Failed to install packages")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error installing packages: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeInstallPackage(
+        container: ContainerInfo,
+        subcommand: String,
+        label: String,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Install $label ===")
+            val scriptContent = appContext.assets.open("packages_setup.sh").bufferedReader().use { it.readText() }
+                .replace("\r\n", "\n").replace("\r", "\n")
+            val b64 = android.util.Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val installCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run 'mkdir -p /usr/local/sbin && echo \"$b64\" | base64 -d > /usr/local/sbin/droidspaces-packages && " +
+                "chmod 755 /usr/local/sbin/droidspaces-packages && /usr/local/sbin/droidspaces-packages $subcommand'"
+
+            val success = ContainerOperationExecutor.executeCommand(installCmd, "install_$subcommand", logger)
+            if (success) {
+                logger.i("$label installed successfully ✓")
+                onSuccess("$label installed")
+            } else {
+                logger.e("Failed to install $label")
+                onError("Failed to install $label")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error installing $label: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeSetupZsh(
+        container: ContainerInfo,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Setup Oh My Zsh & Custom .zshrc ===")
+            val scriptContent = appContext.assets.open("packages_setup.sh").bufferedReader().use { it.readText() }
+                .replace("\r\n", "\n").replace("\r", "\n")
+            val b64 = android.util.Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val targetUser = container.defaultUsername.ifBlank { container.sshUser.ifBlank { "zen" } }
+            val installCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run 'mkdir -p /usr/local/sbin && echo \"$b64\" | base64 -d > /usr/local/sbin/droidspaces-packages && " +
+                "chmod 755 /usr/local/sbin/droidspaces-packages && /usr/local/sbin/droidspaces-packages install-zsh ${ContainerCommandBuilder.quote(targetUser)}'"
+
+            val success = ContainerOperationExecutor.executeCommand(installCmd, "setup_zsh", logger)
+            if (success) {
+                logger.i("Oh My Zsh & .zshrc configured successfully ✓")
+                onSuccess("Zsh environment configured")
+            } else {
+                logger.e("Failed to setup Zsh")
+                onError("Failed to setup Zsh")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error setting up Zsh: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Programs Operations
+    // ---------------------------------------------------------------------------
+    suspend fun executeInstallProgram(
+        container: ContainerInfo,
+        programId: String,
+        programName: String,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Install $programName in '${container.name}' ===")
+            val scriptContent = appContext.assets.open("programs_setup.sh").bufferedReader().use { it.readText() }
+                .replace("\r\n", "\n").replace("\r", "\n")
+            val b64 = android.util.Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val installCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run 'mkdir -p /usr/local/sbin && echo \"$b64\" | base64 -d > /usr/local/sbin/droidspaces-programs && " +
+                "chmod 755 /usr/local/sbin/droidspaces-programs && /usr/local/sbin/droidspaces-programs install $programId'"
+
+            val success = ContainerOperationExecutor.executeCommand(installCmd, "install_$programId", logger)
+            if (success) {
+                logger.i("$programName installed successfully ✓")
+                onSuccess("$programName installed")
+            } else {
+                logger.e("Failed to install $programName")
+                onError("Failed to install $programName")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error installing $programName: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeUninstallProgram(
+        container: ContainerInfo,
+        programId: String,
+        programName: String,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Uninstall $programName from '${container.name}' ===")
+            val uninstallCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run '/usr/local/sbin/droidspaces-programs uninstall $programId'"
+            val success = ContainerOperationExecutor.executeCommand(uninstallCmd, "uninstall_$programId", logger)
+            if (success) {
+                logger.i("$programName uninstalled successfully ✓")
+                onSuccess("$programName uninstalled")
+            } else {
+                logger.e("Failed to uninstall $programName")
+                onError("Failed to uninstall $programName")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error uninstalling $programName: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeStartProgramService(
+        container: ContainerInfo,
+        programId: String,
+        programName: String,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Start Service $programName ===")
+            val cmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run '/usr/local/sbin/droidspaces-programs service-start $programId'"
+            val success = ContainerOperationExecutor.executeCommand(cmd, "service_start_$programId", logger)
+            if (success) {
+                logger.i("$programName service started ✓")
+                onSuccess("$programName service started")
+            } else {
+                logger.e("Failed to start $programName service")
+                onError("Failed to start $programName service")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error starting $programName: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeStopProgramService(
+        container: ContainerInfo,
+        programId: String,
+        programName: String,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Stop Service $programName ===")
+            val cmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run '/usr/local/sbin/droidspaces-programs service-stop $programId'"
+            val success = ContainerOperationExecutor.executeCommand(cmd, "service_stop_$programId", logger)
+            if (success) {
+                logger.i("$programName service stopped ✓")
+                onSuccess("$programName service stopped")
+            } else {
+                logger.e("Failed to stop $programName service")
+                onError("Failed to stop $programName service")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error stopping $programName: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
 }

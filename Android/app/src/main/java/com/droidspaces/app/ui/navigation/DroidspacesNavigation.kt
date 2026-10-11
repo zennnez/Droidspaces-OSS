@@ -56,6 +56,10 @@ import com.droidspaces.app.ui.screen.DockerContainerLogsScreen
 import com.droidspaces.app.ui.screen.TailscaleScreen
 import com.droidspaces.app.ui.screen.CaddyScreen
 import com.droidspaces.app.ui.screen.NetworkDiscoveryScreen
+import com.droidspaces.app.ui.screen.ContainerHtopScreen
+import com.droidspaces.app.ui.screen.PackagesScreen
+import com.droidspaces.app.ui.screen.ProgramsScreen
+import com.droidspaces.app.ui.screen.AliasesScreen
 import com.droidspaces.app.ui.viewmodel.ContainerInstallationViewModel
 import com.droidspaces.app.ui.viewmodel.ContainerViewModel
 import com.droidspaces.app.util.ContainerManager
@@ -179,6 +183,19 @@ sealed class Screen(val route: String) {
     }
     data object CaddyManage : Screen("caddy_manage/{containerName}") {
         fun createRoute(containerName: String) = "caddy_manage/${Uri.encode(containerName)}"
+    }
+    data object Htop : Screen("htop/{containerName}?sort={sort}") {
+        fun createRoute(containerName: String, sort: String = "cpu") =
+            "htop/${Uri.encode(containerName)}?sort=${Uri.encode(sort)}"
+    }
+    data object PackagesManage : Screen("packages_manage/{containerName}") {
+        fun createRoute(containerName: String) = "packages_manage/${Uri.encode(containerName)}"
+    }
+    data object ProgramsManage : Screen("programs_manage/{containerName}") {
+        fun createRoute(containerName: String) = "programs_manage/${Uri.encode(containerName)}"
+    }
+    data object AliasesManage : Screen("aliases_manage/{containerName}") {
+        fun createRoute(containerName: String) = "aliases_manage/${Uri.encode(containerName)}"
     }
 }
 
@@ -778,6 +795,18 @@ fun DroidspacesNavigation(
                     onNavigateToCaddy = {
                         navController.navigate(Screen.CaddyManage.createRoute(containerName))
                     },
+                    onNavigateToHtop = { sort ->
+                        navController.navigate(Screen.Htop.createRoute(containerName, sort))
+                    },
+                    onNavigateToPackages = {
+                        navController.navigate(Screen.PackagesManage.createRoute(containerName))
+                    },
+                    onNavigateToPrograms = {
+                        navController.navigate(Screen.ProgramsManage.createRoute(containerName))
+                    },
+                    onNavigateToAliases = {
+                        navController.navigate(Screen.AliasesManage.createRoute(containerName))
+                    },
                     onNavigateToTerminalWithCommand = { cmd: String ->
                         navController.navigate(Screen.Terminal.createRoute(containerName, cmd))
                     }
@@ -1160,6 +1189,89 @@ fun DroidspacesNavigation(
         ) { backStackEntry ->
             val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
             CaddyScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToTerminalWithCommand = { name, cmd ->
+                    navController.navigate(Screen.Terminal.createRoute(name, cmd))
+                }
+            )
+        }
+
+        composable(
+            route = Screen.Htop.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType },
+                navArgument("sort") {
+                    type = NavType.StringType
+                    defaultValue = "cpu"
+                }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            val sort = backStackEntry.arguments?.getString("sort") ?: "cpu"
+            ContainerHtopScreen(
+                containerName = containerName,
+                initialSort = sort,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.PackagesManage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            PackagesScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToTerminalWithCommand = { name, cmd ->
+                    navController.navigate(Screen.Terminal.createRoute(name, cmd))
+                }
+            )
+        }
+
+        composable(
+            route = Screen.ProgramsManage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            ProgramsScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToTerminalWithCommand = { name, cmd ->
+                    navController.navigate(Screen.Terminal.createRoute(name, cmd))
+                }
+            )
+        }
+
+        composable(
+            route = Screen.AliasesManage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            AliasesScreen(
                 containerName = containerName,
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToTerminalWithCommand = { name, cmd ->

@@ -36,6 +36,10 @@ import com.droidspaces.app.util.AnimationUtils
 import com.droidspaces.app.util.IconUtils
 import com.droidspaces.app.ui.util.LoadingIndicator
 import com.droidspaces.app.ui.util.LoadingSize
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.droidspaces.app.ui.viewmodel.ContainerOperationsViewModel
+import com.droidspaces.app.ui.component.TerminalDialog
+import com.droidspaces.app.util.PreferencesManager
 import androidx.compose.ui.platform.LocalContext
 import com.droidspaces.app.R
 import com.droidspaces.app.service.TerminalSessionService
@@ -83,9 +87,14 @@ fun ContainerDetailsScreen(
     onNavigateToDocker: () -> Unit = {},
     onNavigateToTailscale: () -> Unit = {},
     onNavigateToCaddy: () -> Unit = {},
+    onNavigateToHtop: (String) -> Unit = {},
+    onNavigateToPackages: () -> Unit = {},
+    onNavigateToPrograms: () -> Unit = {},
+    onNavigateToAliases: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val opsViewModel: ContainerOperationsViewModel = viewModel()
     var refreshTrigger by remember { mutableIntStateOf(0) }
 
     // Pre-load cached OS info for instant display - zero delay
@@ -240,8 +249,8 @@ fun ContainerDetailsScreen(
                                     add { IdentityToken(context.getString(R.string.uptime), info.uptime ?: "0s", rememberVectorPainter(image = Icons.Default.Timer), MaterialTheme.colorScheme.tertiary) }
                                     add { IdentityToken(context.getString(R.string.ip_address), info.ipAddress ?: "127.0.0.1", rememberVectorPainter(image = Icons.Default.Lan), MaterialTheme.colorScheme.outline) }
                                     if (container.isRunning) {
-                                        add { IdentityToken(context.getString(R.string.cpu_usage_label), info.cpuUsage?.let { context.getString(R.string.cpu_percent_label, it) } ?: "---", rememberVectorPainter(image = Icons.Default.Speed), MaterialTheme.colorScheme.primary) }
-                                        add { IdentityToken(context.getString(R.string.ram_usage_label), info.ramLabel(context) ?: "---", rememberVectorPainter(image = Icons.Default.Memory), MaterialTheme.colorScheme.secondary) }
+                                        add { IdentityToken(context.getString(R.string.cpu_usage_label), info.cpuUsage?.let { context.getString(R.string.cpu_percent_label, it) } ?: "---", rememberVectorPainter(image = Icons.Default.Speed), MaterialTheme.colorScheme.primary, onClick = { onNavigateToHtop("cpu") }) }
+                                        add { IdentityToken(context.getString(R.string.ram_usage_label), info.ramLabel(context) ?: "---", rememberVectorPainter(image = Icons.Default.Memory), MaterialTheme.colorScheme.secondary, onClick = { onNavigateToHtop("mem") }) }
                                     }
                                 } }
 
@@ -273,9 +282,11 @@ fun ContainerDetailsScreen(
                 // Users Card - Stable key (don't include refreshTrigger to prevent recreation)
                 item(key = "users_${container.name}") {
                     ContainerUsersCard(
-                        containerName = container.name,
+                        container = container,
                         refreshTrigger = refreshTrigger,
-                        snackbarHostState = snackbarHostState
+                        opsViewModel = opsViewModel,
+                        snackbarHostState = snackbarHostState,
+                        onRefreshUsers = { refreshTrigger++ }
                     )
                 }
 
@@ -352,7 +363,35 @@ fun ContainerDetailsScreen(
                 onNavigateToDocker = onNavigateToDocker,
                 onNavigateToTailscale = onNavigateToTailscale,
                 onNavigateToCaddy = onNavigateToCaddy,
-                onNavigateToNetworkDiscovery = onNavigateToNetworkDiscovery
+                onNavigateToNetworkDiscovery = onNavigateToNetworkDiscovery,
+                onNavigateToPackages = onNavigateToPackages,
+                onNavigateToPrograms = onNavigateToPrograms,
+                onNavigateToAliases = onNavigateToAliases
+            )
+        }
+
+        // Live terminal console for container operations (such as Add User)
+        opsViewModel.showLogViewerFor?.let { containerName ->
+            val memoryLogs = opsViewModel.logsFor(containerName)
+            val prefsManager = remember { PreferencesManager.getInstance(context) }
+            val cachedLogs = if (memoryLogs.isEmpty()) {
+                prefsManager.loadContainerLogs(containerName)
+            } else {
+                emptyList()
+            }
+            val logs = memoryLogs.ifEmpty { cachedLogs }
+            val isBlocking = opsViewModel.runningOperationContainer == containerName
+            TerminalDialog(
+                title = context.getString(R.string.logs_title, containerName),
+                logs = logs,
+                onDismiss = {
+                    opsViewModel.showLogViewerFor = null
+                    refreshTrigger++
+                },
+                onClear = {
+                    opsViewModel.clearLogsBuffer(containerName)
+                },
+                isBlocking = isBlocking
             )
         }
     }
@@ -401,9 +440,12 @@ private fun IdentityToken(
     value: String,
     painter: androidx.compose.ui.graphics.painter.Painter,
     containerColor: androidx.compose.ui.graphics.Color,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     Surface(
+        onClick = onClick ?: {},
+        enabled = onClick != null,
         modifier = modifier
             .fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -1065,6 +1107,24 @@ private fun MoreToolsBottomSheet(
                 description = "Zero-config mesh VPN networking for container instances",
                 icon = Icons.Default.VpnKey,
                 onClick = onNavigateToTailscale
+            ),
+            MoreToolEntry(
+                title = "Installed Packages",
+                description = "Search, install, update and inspect package managers",
+                icon = Icons.Default.Inventory2,
+                onClick = onNavigateToPackages
+            ),
+            MoreToolEntry(
+                title = "Desktop Programs",
+                description = "Browse, configure & launch installed GUI applications",
+                icon = Icons.Default.Apps,
+                onClick = onNavigateToPrograms
+            ),
+            MoreToolEntry(
+                title = "Shell Aliases & Functions",
+                description = "Custom shell aliases, functions, exports & shortcuts",
+                icon = Icons.Default.Code,
+                onClick = onNavigateToAliases
             ),
             MoreToolEntry(
                 title = "Caddy Reverse Proxy",

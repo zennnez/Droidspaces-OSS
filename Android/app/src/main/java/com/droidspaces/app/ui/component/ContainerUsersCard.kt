@@ -9,25 +9,43 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.droidspaces.app.ui.component.DsDropdown
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
 import com.droidspaces.app.ui.util.rememberClearFocus
 import androidx.compose.ui.unit.dp
 import com.droidspaces.app.util.Constants
 import com.droidspaces.app.util.ContainerCommandBuilder
+import com.droidspaces.app.util.ContainerInfo
 import com.droidspaces.app.util.ContainerUsersManager
+import com.droidspaces.app.ui.viewmodel.ContainerOperationsViewModel
 import com.droidspaces.app.ui.util.LoadingIndicator
 import com.droidspaces.app.ui.util.LoadingSize
+import com.droidspaces.app.ui.util.showError
 import com.droidspaces.app.ui.util.showSuccess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -38,11 +56,14 @@ import com.droidspaces.app.R
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContainerUsersCard(
-    containerName: String,
+    container: ContainerInfo,
     refreshTrigger: Int = 0,
+    opsViewModel: ContainerOperationsViewModel? = null,
     snackbarHostState: SnackbarHostState? = null,
+    onRefreshUsers: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val containerName = container.name
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val clearFocus = rememberClearFocus()
@@ -57,6 +78,7 @@ fun ContainerUsersCard(
         mutableStateOf(ContainerUsersManager.getCachedUsers(containerName) == null)
     }
     var isManuallyRefreshing by remember { mutableStateOf(false) }
+    var showAddUserDialog by remember { mutableStateOf(false) }
 
     // Available users list: always include "root", plus any local users
     val availableUsers = remember(users) {
@@ -67,21 +89,26 @@ fun ContainerUsersCard(
         userList
     }
 
-    // Selected user state - default to "root"
-    var selectedUser by remember { mutableStateOf("root") }
+    // Selected user state - default to first non-root user if present, else "root"
+    val defaultUser = remember(availableUsers) {
+        availableUsers.firstOrNull { it != "root" } ?: "root"
+    }
+    var selectedUser by remember { mutableStateOf(defaultUser) }
 
-    // Update selected user when users list changes (keep current selection if still valid)
+    // State for deleting user
+    var userToDelete by remember { mutableStateOf<String?>(null) }
+    var isDeletingUser by remember { mutableStateOf(false) }
+
+    // Update selected user when users list changes (prefer non-root if current is root or invalid)
     LaunchedEffect(users) {
-        if (!availableUsers.contains(selectedUser)) {
-            selectedUser = "root"
+        if (!availableUsers.contains(selectedUser) || selectedUser == "root") {
+            val nonRoot = availableUsers.firstOrNull { it != "root" }
+            selectedUser = nonRoot ?: "root"
         }
     }
 
-
     LaunchedEffect(containerName, refreshTrigger) {
         scope.launch {
-            // Only show loading if we don't have cached data (first load)
-            // Don't show loading on refresh to prevent glitches
             val shouldShowLoading = users.isEmpty() && refreshTrigger == 0
             if (shouldShowLoading) {
                 isLoading = true
@@ -92,26 +119,20 @@ fun ContainerUsersCard(
         }
     }
 
-
-    // Manual refresh function with premium rotation animation
+    // Manual refresh function with rotation animation
     fun refreshUsers() {
         if (!isManuallyRefreshing) {
             isManuallyRefreshing = true
             scope.launch {
-                // Start timing for artificial delay
                 val startTime = System.currentTimeMillis()
-
-                // Fetch fresh data
                 users = ContainerUsersManager.getUsers(containerName, useCache = false)
-
-                // Premium UX: Ensure icon completes exactly 1 full rotation (600ms)
                 val elapsed = System.currentTimeMillis() - startTime
-                val minRotationTime = 600L // One complete 360° rotation
+                val minRotationTime = 600L
                 if (elapsed < minRotationTime) {
                     delay(minRotationTime - elapsed)
                 }
-
                 isManuallyRefreshing = false
+                onRefreshUsers()
             }
         }
     }
@@ -119,7 +140,7 @@ fun ContainerUsersCard(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize(), // Smooth height changes when dropdown opens
+            .animateContentSize(),
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -135,7 +156,7 @@ fun ContainerUsersCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Title area - clickable to unfocus
+                // Title area
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -160,17 +181,15 @@ fun ContainerUsersCard(
                     )
                 }
 
-                // Premium refresh icon button - exactly 1 full rotation, perfectly visible!
+                // Action icons: + Add User and Refresh
                 val rotation by animateFloatAsState(
                     targetValue = if (isManuallyRefreshing) 360f else 0f,
                     animationSpec = if (isManuallyRefreshing) {
-                        // Animate forward smoothly - 600ms for one full rotation
                         tween(
                             durationMillis = 600,
                             easing = LinearEasing
                         )
                     } else {
-                        // Snap back instantly when done (no reverse animation)
                         tween(
                             durationMillis = 0,
                             easing = LinearEasing
@@ -179,68 +198,42 @@ fun ContainerUsersCard(
                     label = "refresh_rotation"
                 )
 
-                IconButton(
-                    onClick = {
-                        clearFocus()
-                        refreshUsers()
-                    },
-                    enabled = !isManuallyRefreshing,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = context.getString(R.string.refresh_users),
-                        modifier = Modifier
-                            .size(20.dp)
-                            .graphicsLayer {
-                                // Hardware-accelerated rotation for buttery smooth 60fps
-                                rotationZ = rotation
-                            },
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            // Show users list - use stable layout to prevent glitches
-            if (isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 40.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    LoadingIndicator(size = LoadingSize.Medium)
-                }
-            } else if (users.isEmpty()) {
-                Text(
-                    text = context.getString(R.string.no_local_users_found),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.heightIn(min = 24.dp)
-                )
-            } else {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier
-                        .heightIn(max = 150.dp)
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() }
-                        ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = {
                             clearFocus()
-                        }
-                ) {
-                    users.forEach { user ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = user,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
+                            showAddUserDialog = true
+                        },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "Add User",
+                            modifier = Modifier.size(22.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Spacer(Modifier.width(4.dp))
+
+                    IconButton(
+                        onClick = {
+                            clearFocus()
+                            refreshUsers()
+                        },
+                        enabled = !isManuallyRefreshing,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = context.getString(R.string.refresh_users),
+                            modifier = Modifier
+                                .size(20.dp)
+                                .graphicsLayer {
+                                    rotationZ = rotation
+                                },
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
@@ -253,11 +246,37 @@ fun ContainerUsersCard(
                 onSelect = { selectedUser = it }
             )
 
-            // Copy login button - right aligned, same dimensions and style as Manage button
+            // Action buttons: Delete (for non-root) and Copy Login
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                if (selectedUser != "root") {
+                    FilledTonalButton(
+                        onClick = {
+                            clearFocus()
+                            userToDelete = selectedUser
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Delete",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
                 Button(
                     onClick = {
                         clearFocus()
@@ -288,8 +307,7 @@ fun ContainerUsersCard(
                             }
                         }
                     },
-                    modifier = Modifier.widthIn(min = 140.dp),
-                    shape = RoundedCornerShape(16.dp),
+                    modifier = if (selectedUser != "root") Modifier.weight(1f) else Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
@@ -305,6 +323,377 @@ fun ContainerUsersCard(
                         context.getString(R.string.copy_login),
                         fontWeight = FontWeight.SemiBold
                     )
+                }
+            }
+        }
+    }
+
+    // Warning confirmation dialog for deleting selected user (styled with unified dialog theme)
+    userToDelete?.let { targetUser ->
+        Dialog(
+            onDismissRequest = { if (!isDeletingUser) userToDelete = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                tonalElevation = 0.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Header: Warning Icon + Title + Close button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Text(
+                                text = "Delete User '$targetUser'?",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Surface(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(
+                                    enabled = !isDeletingUser,
+                                    onClick = { userToDelete = null }
+                                ),
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "Are you sure you want to delete user '$targetUser' and their home directory from container '$containerName'?\n\nThis action cannot be undone.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = { userToDelete = null },
+                            enabled = !isDeletingUser
+                        ) {
+                            Text("Cancel")
+                        }
+
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    isDeletingUser = true
+                                    val result = ContainerUsersManager.deleteUser(containerName, targetUser)
+                                    isDeletingUser = false
+                                    userToDelete = null
+                                    if (result.isSuccess) {
+                                        snackbarHostState?.let { hostState ->
+                                            scope.launch {
+                                                hostState.showSuccess("User '$targetUser' deleted successfully")
+                                            }
+                                        }
+                                        if (selectedUser == targetUser) {
+                                            selectedUser = "root"
+                                        }
+                                        refreshUsers()
+                                    } else {
+                                        snackbarHostState?.let { hostState ->
+                                            scope.launch {
+                                                hostState.showSnackbar("Failed to delete user: ${result.exceptionOrNull()?.message}")
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError
+                            ),
+                            enabled = !isDeletingUser
+                        ) {
+                            if (isDeletingUser) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onError
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text("Delete", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAddUserDialog) {
+        AddUserDialog(
+            containerName = containerName,
+            onDismiss = { showAddUserDialog = false },
+            onConfirm = { newUsername, newPassword, grantSudo, shell ->
+                showAddUserDialog = false
+                if (opsViewModel != null) {
+                    scope.launch {
+                        opsViewModel.executeAddUser(
+                            container = container,
+                            username = newUsername,
+                            password = newPassword,
+                            grantSudo = grantSudo,
+                            shell = shell,
+                            onRefresh = {
+                                refreshUsers()
+                                onRefreshUsers()
+                            },
+                            onError = { err ->
+                                snackbarHostState?.let { hostState ->
+                                    scope.launch { hostState.showError(err) }
+                                }
+                            },
+                            onSuccess = { msg ->
+                                selectedUser = newUsername
+                                snackbarHostState?.let { hostState ->
+                                    scope.launch { hostState.showSuccess(msg) }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun AddUserDialog(
+    containerName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (username: String, password: String, grantSudo: Boolean, shell: String) -> Unit
+) {
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    var grantSudo by remember { mutableStateOf(true) }
+    var selectedShell by remember { mutableStateOf("/bin/bash") }
+    val availableShells = listOf("/bin/bash", "/bin/sh", "/bin/zsh")
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+            tonalElevation = 0.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Header: Icon + Title + Close button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            Icons.Default.PersonAdd,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text = "Add New User",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Surface(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(onClick = onDismiss),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Close",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    text = "Create a new user account inside '$containerName'.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // Username field
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = {
+                        username = it.lowercase().filter { c -> c.isLetterOrDigit() || c == '_' || c == '-' }
+                        errorMessage = null
+                    },
+                    label = { Text("Username") },
+                    placeholder = { Text("e.g. droid, user, dev") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = errorMessage != null
+                )
+
+                // Password field
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password (Optional)") },
+                    placeholder = { Text("Leave blank for passwordless login") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = null
+                            )
+                        }
+                    }
+                )
+
+                // Shell selector
+                DsDropdown(
+                    label = "Login Shell",
+                    selected = selectedShell,
+                    options = availableShells,
+                    displayName = { it },
+                    onSelect = { selectedShell = it }
+                )
+
+                // Sudo toggle
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { grantSudo = !grantSudo }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Grant Sudo / Root Privileges",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                if (grantSudo) "Add user to sudo/wheel group & sudoers" else "Standard user without elevated access",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = grantSudo,
+                            onCheckedChange = { grantSudo = it }
+                        )
+                    }
+                }
+
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                // Action buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+
+                    Button(
+                        onClick = {
+                            val cleanUser = username.trim()
+                            if (cleanUser.isBlank()) {
+                                errorMessage = "Username cannot be empty"
+                                return@Button
+                            }
+                            if (cleanUser == "root") {
+                                errorMessage = "Root user already exists"
+                                return@Button
+                            }
+                            onConfirm(cleanUser, password, grantSudo, selectedShell)
+                        },
+                        enabled = username.isNotBlank()
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Add User", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
