@@ -418,9 +418,14 @@ int internal_boot(struct ds_config *cfg) {
     ds_warn("Failed to mount tmpfs at /tmp: %s", strerror(errno));
 
   /* 14. Bind-mount console BEFORE pivot_root (host pts still visible). */
-  if (mount(cfg->console.name, "dev/console", NULL, MS_BIND, NULL) < 0)
-    ds_warn("Failed to bind mount console '%s': %s", cfg->console.name,
-            strerror(errno));
+  if (cfg->console.name[0] != '\0' && access(cfg->console.name, F_OK) == 0) {
+    if (mount(cfg->console.name, "dev/console", NULL, MS_BIND, NULL) < 0)
+      ds_warn("Failed to bind mount console '%s': %s", cfg->console.name,
+              strerror(errno));
+  } else {
+    ds_warn("Console device '%s' not accessible for bind-mounting (skipping)",
+            cfg->console.name[0] ? cfg->console.name : "(none)");
+  }
 
   /* 15. Android-specific storage */
   if (cfg->android_storage) {
@@ -551,7 +556,7 @@ int internal_boot(struct ds_config *cfg) {
   ds_env_boot_setup(cfg);
   ds_env_save("/run/droidspaces.env", cfg);
 
-  /* 23b. Integration with /etc/profile.d for universal sourcing */
+  /* 23b. Integration with /etc/profile.d and shell rc configs for universal sourcing */
   if (access("/etc/profile.d", F_OK) == 0) {
     const char *profile_link = "/etc/profile.d/droidspaces_env.sh";
     /* Always recreate - avoids TOCTOU and fixes stale symlinks after rootfs
@@ -560,6 +565,32 @@ int internal_boot(struct ds_config *cfg) {
     if (symlink("/run/droidspaces.env", profile_link) < 0 && errno != EEXIST) {
       ds_warn("Failed to create profile.d symlink: %s", strerror(errno));
     }
+  }
+
+  /* Fish shell integration (/etc/fish/conf.d/droidspaces.fish) */
+  if (access("/etc/fish", F_OK) == 0 || access("/usr/share/fish", F_OK) == 0) {
+    mkdir_p("/etc/fish/conf.d", 0755);
+    const char *fish_conf =
+        "# Droidspaces environment\n"
+        "if test -f /run/droidspaces.env\n"
+        "    for line in (cat /run/droidspaces.env | string match -r '^[^#]+=.*')\n"
+        "        set -l kv (string split -m 1 '=' -- $line)\n"
+        "        set -l val (string trim -c '\"'\\'' -- $kv[2])\n"
+        "        if not set -q $kv[1]\n"
+        "            set -gx $kv[1] $val\n"
+        "        end\n"
+        "    end\n"
+        "end\n";
+    write_file("/etc/fish/conf.d/droidspaces.fish", fish_conf);
+  }
+
+  /* Bash and Zsh system-wide interactive shell integration */
+  const char *rc_snippet = "\n# Droidspaces environment\n[ -f /run/droidspaces.env ] && . /run/droidspaces.env\n";
+  if (access("/etc/bash.bashrc", F_OK) == 0) {
+    append_file_if_missing("/etc/bash.bashrc", "[ -f /run/droidspaces.env ]", rc_snippet);
+  }
+  if (access("/etc/zsh", F_OK) == 0) {
+    append_file_if_missing("/etc/zsh/zshrc", "[ -f /run/droidspaces.env ]", rc_snippet);
   }
 
   /* 23c. Apply security hardening (capabilities)
