@@ -1510,32 +1510,26 @@ int run_in_rootfs(struct ds_config *cfg, char **argv, const char *as_user) {
 
       /* Run the command directly as an alien process (instant results) */
       if (as_user != NULL) {
-        /* Build the command string for su -c.
-         * If argv[0] has no spaces and argv[1] is NULL, pass it directly.
-         * Otherwise join all args into a single shell string. */
-        char cmd_buf[4096];
-        if (argv[1] == NULL) {
-          /* Single argument is treated as a shell command string as-is, so a
-           * caller can pass e.g. `-- "ls -la | grep foo"`. */
-          safe_strncpy(cmd_buf, argv[0], sizeof(cmd_buf));
-        } else {
-          /* Multiple args: shell-quote each so word boundaries (spaces, globs,
-           * metacharacters) survive su's shell -- e.g. `-- rm "a b"` stays two
-           * arguments instead of being resplit into three. */
-          size_t off = 0;
-          for (int k = 0; argv[k]; k++)
-            off = shell_quote_append(cmd_buf, off, sizeof(cmd_buf), argv[k],
-                                     k == 0);
+        uid_t target_uid = 0;
+        gid_t target_gid = 0;
+        char user_home[PATH_MAX] = "/root";
+        char user_shell[PATH_MAX] = "/bin/sh";
+
+        get_user_account_info(as_user, &target_uid, &target_gid, user_home,
+                              sizeof(user_home), user_shell, sizeof(user_shell));
+
+        (void)!initgroups(as_user, target_gid);
+        (void)!setresgid(target_gid, target_gid, target_gid);
+        (void)!setresuid(target_uid, target_uid, target_uid);
+
+        if (user_home[0] != '\0' && chdir(user_home) < 0) {
+          (void)!chdir("/");
         }
-        char *su_argv[] = {"su", "-",     (char *)(uintptr_t)as_user,
-                           "-c", cmd_buf, NULL};
-        execvp("/bin/su", su_argv);
-        execvp("/usr/bin/su", su_argv);
-        execvp("/run/wrappers/bin/su", su_argv);
-        int code = exec_exit_code();
-        ds_error("Failed to exec su for user '%s': %s", as_user,
-                 strerror(errno));
-        _exit(code);
+
+        setenv("HOME", user_home, 1);
+        setenv("USER", as_user, 1);
+        setenv("LOGNAME", as_user, 1);
+        setenv("SHELL", user_shell, 1);
       }
 
       if (argv[1] == NULL && strchr(argv[0], ' ') != NULL) {

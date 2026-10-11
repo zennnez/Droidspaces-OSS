@@ -426,6 +426,27 @@ int write_file(const char *path, const char *content) {
   return (w == (ssize_t)len && close_ret == 0) ? 0 : -1;
 }
 
+int append_file_if_missing(const char *path, const char *pattern,
+                           const char *content_to_append) {
+  if (!path || !pattern || !content_to_append)
+    return -1;
+
+  char existing[8192];
+  if (read_file(path, existing, sizeof(existing)) >= 0) {
+    if (strstr(existing, pattern) != NULL)
+      return 0;
+  }
+
+  int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+  if (fd < 0)
+    return -1;
+
+  size_t len = strlen(content_to_append);
+  ssize_t w = write_all(fd, content_to_append, len);
+  int close_ret = close(fd);
+  return (w == (ssize_t)len && close_ret == 0) ? 0 : -1;
+}
+
 int write_file_atomic(const char *path, const char *content) {
   /* Randomized name + O_EXCL (via mkstemp) so a symlink pre-planted at a
    * predictable "<path>.tmp" cannot redirect this (often root-owned) write or
@@ -1439,43 +1460,87 @@ ds_init_type_t detect_container_init(const char *path) {
   return DS_INIT_UNKNOWN;
 }
 
-int get_user_shell(const char *user, char *shell_buf, size_t size) {
-  if (!user || user[0] == '\0' || !shell_buf || size == 0)
+int get_user_account_info(const char *user, uid_t *out_uid, gid_t *out_gid,
+                          char *home_buf, size_t home_size, char *shell_buf,
+                          size_t shell_size) {
+  if (!user || user[0] == '\0')
     return -1;
 
   FILE *f = fopen("/etc/passwd", "re");
-  if (!f)
+  if (!f) {
+    if (strcmp(user, "root") == 0) {
+      if (out_uid)
+        *out_uid = 0;
+      if (out_gid)
+        *out_gid = 0;
+      if (home_buf && home_size > 0)
+        safe_strncpy(home_buf, "/root", home_size);
+      if (shell_buf && shell_size > 0)
+        safe_strncpy(shell_buf, "/bin/sh", shell_size);
+      return 0;
+    }
     return -1;
+  }
 
   char line[1024];
   int found = 0;
   while (fgets(line, sizeof(line), f)) {
-    /* Format: user:pw:uid:gid:gecos:home:shell */
+    /* Format: name:pw:uid:gid:gecos:home:shell */
     char line_copy[1024];
     strncpy(line_copy, line, sizeof(line_copy) - 1);
     line_copy[sizeof(line_copy) - 1] = '\0';
 
-    char *saveptr;
-    char *name = strtok_r(line_copy, ":", &saveptr);
+    /* Strip trailing newline / carriage return */
+    char *nl = strpbrk(line_copy, "\r\n");
+    if (nl)
+      *nl = '\0';
+
+    char *cursor = line_copy;
+    char *name = strsep(&cursor, ":");
     if (!name || strcmp(name, user) != 0)
       continue;
 
-    /* Skip 5 fields to reach the shell (field 7) */
-    for (int i = 0; i < 5; i++) {
-      if (!strtok_r(NULL, ":", &saveptr))
-        break;
-    }
-    char *shell = strtok_r(NULL, ":\n", &saveptr);
+    char *pw = strsep(&cursor, ":");
+    (void)pw;
+    char *uid_str = strsep(&cursor, ":");
+    char *gid_str = strsep(&cursor, ":");
+    char *gecos = strsep(&cursor, ":");
+    (void)gecos;
+    char *home = strsep(&cursor, ":");
+    char *shell = strsep(&cursor, ":");
 
-    if (shell) {
-      safe_strncpy(shell_buf, shell, size);
-      found = 1;
-      break;
-    }
+    if (out_uid && uid_str && uid_str[0] != '\0')
+      *out_uid = (uid_t)atoi(uid_str);
+    if (out_gid && gid_str && gid_str[0] != '\0')
+      *out_gid = (gid_t)atoi(gid_str);
+    if (home_buf && home_size > 0 && home && home[0] != '\0')
+      safe_strncpy(home_buf, home, home_size);
+    if (shell_buf && shell_size > 0 && shell && shell[0] != '\0')
+      safe_strncpy(shell_buf, shell, shell_size);
+
+    found = 1;
+    break;
   }
 
   fclose(f);
+
+  if (!found && strcmp(user, "root") == 0) {
+    if (out_uid)
+      *out_uid = 0;
+    if (out_gid)
+      *out_gid = 0;
+    if (home_buf && home_size > 0)
+      safe_strncpy(home_buf, "/root", home_size);
+    if (shell_buf && shell_size > 0)
+      safe_strncpy(shell_buf, "/bin/sh", shell_size);
+    return 0;
+  }
+
   return found ? 0 : -1;
+}
+
+int get_user_shell(const char *user, char *shell_buf, size_t size) {
+  return get_user_account_info(user, NULL, NULL, NULL, 0, shell_buf, size);
 }
 
 int get_selinux_context(const char *path, char *buf, size_t size) {

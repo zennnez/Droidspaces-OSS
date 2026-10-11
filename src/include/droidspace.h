@@ -509,6 +509,8 @@ int is_ramfs(const char *path);
 int is_subpath(const char *parent, const char *child);
 int is_running_in_termux(void);
 int write_file(const char *path, const char *content);
+int append_file_if_missing(const char *path, const char *pattern,
+                           const char *content_to_append);
 int read_file(const char *path, char *buf, size_t size);
 int write_file_atomic(const char *path, const char *content);
 ssize_t write_all(int fd, const void *buf, size_t count);
@@ -540,6 +542,9 @@ void print_ds_banner(void);
 int is_systemd_rootfs(const char *path);
 
 ds_init_type_t detect_container_init(const char *path);
+int get_user_account_info(const char *user, uid_t *out_uid, gid_t *out_gid,
+                          char *home_buf, size_t home_size, char *shell_buf,
+                          size_t shell_size);
 int get_user_shell(const char *user, char *shell_buf, size_t size);
 void check_kernel_recommendation(void);
 void write_monitor_debug_log(const char *name, const char *fmt, ...);
