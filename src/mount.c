@@ -820,6 +820,12 @@ int setup_custom_binds(struct ds_config *cfg, const char *rootfs) {
       mkdir_p(parent, 0755);
     }
 
+    /* Ensure host-side source directory exists if missing */
+    struct stat st_src;
+    if (lstat(cfg->binds[i].src, &st_src) < 0) {
+      mkdir_p(cfg->binds[i].src, 0777);
+    }
+
     /* Perform bind mount (handles source/target symlink checks securely) */
     if (bind_mount(cfg->binds[i].src, tgt) < 0) {
       ds_warn("Failed to bind mount %s on %s (skipping)", cfg->binds[i].src,
