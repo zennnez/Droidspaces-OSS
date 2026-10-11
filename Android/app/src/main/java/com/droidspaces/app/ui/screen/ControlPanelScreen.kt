@@ -28,6 +28,12 @@ import com.droidspaces.app.ui.util.rememberAnimatedEntries
 import com.droidspaces.app.ui.viewmodel.ContainerViewModel
 import com.droidspaces.app.ui.viewmodel.SystemStatsViewModel
 import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.droidspaces.app.ui.component.TrayAppsCard
+import com.droidspaces.app.notify.NotificationBridgeService
+import com.droidspaces.app.notify.TrayBridgeState
 import com.droidspaces.app.R
 
 /**
@@ -50,6 +56,25 @@ fun ControlPanelScreen(
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val systemStatsViewModel: SystemStatsViewModel = viewModel()
+
+    val trayByContainer by TrayBridgeState.byContainer.collectAsStateWithLifecycle()
+    val trayMenus by TrayBridgeState.menus.collectAsStateWithLifecycle()
+
+    fun sendTrayCommand(
+        containerName: String,
+        bridgeId: Int,
+        command: String,
+        actionId: Int? = null,
+    ) {
+        val intent = Intent(context, NotificationBridgeService::class.java).apply {
+            action = NotificationBridgeService.ACTION_RELAY_COMMAND
+            putExtra(NotificationBridgeService.EXTRA_CONTAINER, containerName)
+            putExtra(NotificationBridgeService.EXTRA_BRIDGE_ID, bridgeId)
+            putExtra(NotificationBridgeService.EXTRA_COMMAND, command)
+            if (actionId != null) putExtra(NotificationBridgeService.EXTRA_ACTION_ID, actionId)
+        }
+        ContextCompat.startForegroundService(context, intent)
+    }
 
     // Get running containers - derived from ViewModel state
     val runningContainers = containerViewModel.containerList.filter { it.isRunning }
@@ -119,6 +144,36 @@ fun ControlPanelScreen(
                                         },
                                         osInfo = containerUsageMap[container.name],
                                     )
+
+                                    val trayItems = trayByContainer[container.name]?.items.orEmpty()
+                                    if (trayItems.isNotEmpty()) {
+                                        val itemMenus = trayItems.mapNotNull { item ->
+                                            trayMenus[container.name to item.id]?.let { item.id to it }
+                                        }.toMap()
+                                        TrayAppsCard(
+                                            items = trayItems,
+                                            menus = itemMenus,
+                                            onOpen = { bridgeId ->
+                                                sendTrayCommand(
+                                                    container.name, bridgeId,
+                                                    NotificationBridgeService.COMMAND_TRAY_ACTIVATE,
+                                                )
+                                            },
+                                            onRequestMenu = { bridgeId ->
+                                                sendTrayCommand(
+                                                    container.name, bridgeId,
+                                                    NotificationBridgeService.COMMAND_TRAY_MENU_REQUEST,
+                                                )
+                                            },
+                                            onMenuAction = { bridgeId, actionId ->
+                                                sendTrayCommand(
+                                                    container.name, bridgeId,
+                                                    NotificationBridgeService.COMMAND_TRAY_MENU_ACTION,
+                                                    actionId = actionId,
+                                                )
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }

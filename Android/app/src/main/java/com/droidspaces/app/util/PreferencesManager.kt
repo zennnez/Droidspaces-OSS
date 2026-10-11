@@ -280,6 +280,96 @@ class PreferencesManager private constructor(context: Context) {
         }
     }
 
+    // Linux notification bridge
+
+    var isNotifyBridgeEnabled: Boolean
+        get() = prefs.getBoolean(KEY_NOTIFY_BRIDGE_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_NOTIFY_BRIDGE_ENABLED, value).apply()
+
+    val notifyBridgeEnabledFlow: Flow<Boolean> =
+        booleanPrefFlow(KEY_NOTIFY_BRIDGE_ENABLED, false)
+
+    /** "all" | "important" | "errors-only", mirrors NOTIFICATION_LEVEL. */
+    var notifyBridgeLevel: String
+        get() = prefs.getString(KEY_NOTIFY_BRIDGE_LEVEL, "all") ?: "all"
+        set(value) = prefs.edit().putString(KEY_NOTIFY_BRIDGE_LEVEL, value).apply()
+
+    /**
+     * Per-app checklist state. A missing entry defaults to enabled=true so
+     * newly-seen Linux apps aren't silently dropped (mirrors the daemon's
+     * "app not in list -> allowed" fallback in notify_config.c).
+     */
+    var notifyBridgeApps: LinkedHashMap<String, Boolean>
+        get() {
+            val raw = prefs.getString(KEY_NOTIFY_BRIDGE_APPS, null)
+            val result = LinkedHashMap<String, Boolean>()
+            if (raw.isNullOrBlank()) {
+                Constants.NOTIFY_BRIDGE_DEFAULT_APPS.forEach { result[it] = true }
+                return result
+            }
+            try {
+                val arr = org.json.JSONArray(raw)
+                for (i in 0 until arr.length()) {
+                    val entry = arr.getString(i)
+                    if (entry.startsWith("-")) {
+                        result[entry.substring(1)] = false
+                    } else {
+                        result[entry] = true
+                    }
+                }
+            } catch (_: org.json.JSONException) {
+                Constants.NOTIFY_BRIDGE_DEFAULT_APPS.forEach { result[it] = true }
+            }
+            return result
+        }
+        set(value) {
+            val arr = org.json.JSONArray()
+            value.forEach { (name, enabled) -> arr.put(if (enabled) name else "-$name") }
+            prefs.edit().putString(KEY_NOTIFY_BRIDGE_APPS, arr.toString()).apply()
+        }
+
+    /**
+     * Serializes [notifyBridgeApps] the same way notify-bridge.conf's
+     * APPLICATIONS= line expects, so callers writing the container config
+     * don't need to know the encoding twice.
+     */
+    fun notifyBridgeAppsConfigLine(): String =
+        notifyBridgeApps.entries.joinToString(",") { (name, enabled) ->
+            if (enabled) name else "-$name"
+        }
+
+    /**
+     * Tracks the last daemon boot_id seen per container so the bridge
+     * service can tell "the notify daemon (re)started" apart from "the
+     * socket just blipped" after a reconnect. See NotificationBridgeService.
+     */
+    fun lastKnownBootId(containerName: String): String? =
+        prefs.getString("$KEY_NOTIFY_BRIDGE_LAST_BOOT_ID_PREFIX$containerName", null)
+
+    fun setLastKnownBootId(containerName: String, bootId: String) {
+        prefs.edit()
+            .putString("$KEY_NOTIFY_BRIDGE_LAST_BOOT_ID_PREFIX$containerName", bootId)
+            .apply()
+    }
+
+    // Tray bridge
+
+    var isTrayBridgeEnabled: Boolean
+        get() = prefs.getBoolean(KEY_TRAY_BRIDGE_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_TRAY_BRIDGE_ENABLED, value).apply()
+
+    val trayBridgeEnabledFlow: Flow<Boolean> =
+        booleanPrefFlow(KEY_TRAY_BRIDGE_ENABLED, false)
+
+    /** "android" | "xfce" | "both", mirrors TRAY_MODE. */
+    var trayBridgeMode: String
+        get() = prefs.getString(KEY_TRAY_BRIDGE_MODE, "android") ?: "android"
+        set(value) = prefs.edit().putString(KEY_TRAY_BRIDGE_MODE, value).apply()
+
+    /** Config-file lines for TRAY_BRIDGE/TRAY_MODE. */
+    fun trayBridgeConfigLines(): String =
+        "TRAY_BRIDGE=${isTrayBridgeEnabled}\nTRAY_MODE=$trayBridgeMode"
+
     /**
      * Store container logs in cache (only last action).
      * Format: "level:message\nlevel:message\n..."
@@ -504,6 +594,13 @@ class PreferencesManager private constructor(context: Context) {
         private const val KEY_CACHED_CONTAINER_NAMES = Constants.KEY_CACHED_CONTAINER_NAMES
         private const val KEY_CACHED_CONTAINER_CONFIG_PREFIX = Constants.KEY_CACHED_CONTAINER_CONFIG_PREFIX
         private const val KEY_CUSTOM_REPOS = Constants.KEY_CUSTOM_REPOS
+        private const val KEY_NOTIFY_BRIDGE_ENABLED = Constants.KEY_NOTIFY_BRIDGE_ENABLED
+        private const val KEY_NOTIFY_BRIDGE_APPS = Constants.KEY_NOTIFY_BRIDGE_APPS
+        private const val KEY_NOTIFY_BRIDGE_LEVEL = Constants.KEY_NOTIFY_BRIDGE_LEVEL
+        private const val KEY_NOTIFY_BRIDGE_LAST_BOOT_ID_PREFIX =
+            Constants.KEY_NOTIFY_BRIDGE_LAST_BOOT_ID_PREFIX
+        private const val KEY_TRAY_BRIDGE_ENABLED = Constants.KEY_TRAY_BRIDGE_ENABLED
+        private const val KEY_TRAY_BRIDGE_MODE = Constants.KEY_TRAY_BRIDGE_MODE
 
         // Double-checked locking pattern for thread-safe singleton
         // @Volatile ensures visibility across threads without full synchronization

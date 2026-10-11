@@ -1,0 +1,23 @@
+# Install into ~/.config/autostart/droidspaces-notifyd.desktop (or
+# /etc/xdg/autostart/ for all users) inside the container. This is the
+# recommended install path for containers that don't run systemd as
+# PID 1 - XFCE's session manager (xfce4-session) starts it after the
+# session D-Bus and panel are up, and restarts it if it's re-logged-in.
+#
+#   mkdir -p ~/.config/autostart
+#   cp init/xfce-autostart/droidspaces-notifyd.desktop ~/.config/autostart/
+#
+# The daemon has its own internal restart/reconnect logic (see
+# notify_bridge.c) for anything short of the whole XFCE session
+# restarting; this autostart entry covers "the session itself restarted".
+
+[Desktop Entry]
+Type=Application
+Name=Droidspaces Notification Bridge
+Comment=Forwards Linux desktop notifications to the Droidspaces Android app
+Exec=/usr/bin/droidspaces-notifyd --foreground
+Icon=droidspaces
+Terminal=false
+Hidden=false
+X-GNOME-Autostart-enabled=true
+X-XFCE-Autostart-enabled=true

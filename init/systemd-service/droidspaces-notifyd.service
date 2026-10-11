@@ -1,0 +1,28 @@
+# sudo cp /path/to/compiled/droidspaces-notifyd /usr/bin/droidspaces-notifyd
+# sudo chmod +x /usr/bin/droidspaces-notifyd
+# mkdir -p ~/.config/systemd/user
+# cp init/systemd-service/droidspaces-notifyd.service ~/.config/systemd/user/
+# systemctl --user daemon-reload
+# systemctl --user enable --now droidspaces-notifyd
+#
+# NOTE: this is a --user unit, not a system one. The bridge needs the
+# logged-in session's D-Bus bus (DBUS_SESSION_BUS_ADDRESS) to see
+# libnotify/xfce4-notifyd traffic, so it must run as the desktop user,
+# after the session bus and XFCE itself are up - not at boot.
+
+[Unit]
+Description=Droidspaces Linux -> Android notification bridge
+After=graphical-session.target xfce4-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/droidspaces-notifyd --foreground
+Restart=on-failure
+RestartSec=3
+# Handles "container restart" and "daemon restart": systemd respawns the
+# process, which regenerates its boot_id and re-sends "hello" to any
+# reconnecting Android client, and D-Bus reconnect/backoff is handled
+# internally for session-bus churn short of a full daemon restart.
+
+[Install]
+WantedBy=graphical-session.target

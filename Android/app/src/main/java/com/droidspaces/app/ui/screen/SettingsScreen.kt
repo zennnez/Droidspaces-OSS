@@ -43,6 +43,10 @@ import com.droidspaces.app.ui.component.DialogFooterRow
 import com.droidspaces.app.ui.component.SectionHeader
 import com.droidspaces.app.ui.component.AccentColorPicker
 import com.droidspaces.app.ui.component.BugReportDialog
+import com.droidspaces.app.ui.component.LinuxNotificationsSettingsCard
+import com.droidspaces.app.ui.component.TrayBridgeSettingsCard
+import com.droidspaces.app.notify.NotificationBridgeService
+import androidx.core.content.ContextCompat
 import com.droidspaces.app.ui.component.SettingsGroup
 import com.droidspaces.app.ui.component.SwitchItem
 import com.droidspaces.app.ui.theme.ThemePalette
@@ -117,6 +121,11 @@ fun SettingsScreen(
         .collectAsStateWithLifecycle(initialValue = prefsManager.isSymlinkEnabled)
     val treatAs64Bit by prefsManager.treatAs64BitFlow
         .collectAsStateWithLifecycle(initialValue = prefsManager.treatAs64Bit)
+
+    var isNotifyBridgeEnabled by remember { mutableStateOf(prefsManager.isNotifyBridgeEnabled) }
+    var notifyBridgeApps by remember { mutableStateOf(prefsManager.notifyBridgeApps) }
+    var isTrayBridgeEnabled by remember { mutableStateOf(prefsManager.isTrayBridgeEnabled) }
+    var trayBridgeMode by remember { mutableStateOf(prefsManager.trayBridgeMode) }
 
     // Listen for locale changes and sync daemon mode from disk
     LaunchedEffect(Unit) {
@@ -320,6 +329,70 @@ fun SettingsScreen(
                 onNavigateToRequirements = onNavigateToRequirements
             )
                 }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Linux Notifications Section
+            Text(
+                text = context.getString(R.string.settings_linux_notifications_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 24.dp, bottom = 8.dp, top = 8.dp),
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            LinuxNotificationsSettingsCard(
+                enabled = isNotifyBridgeEnabled,
+                onEnabledChange = { checked ->
+                    isNotifyBridgeEnabled = checked
+                    prefsManager.isNotifyBridgeEnabled = checked
+                    val serviceIntent = Intent(context, NotificationBridgeService::class.java)
+                    if (checked) {
+                        ContextCompat.startForegroundService(context, serviceIntent)
+                    } else {
+                        serviceIntent.action = NotificationBridgeService.ACTION_STOP
+                        ContextCompat.startForegroundService(context, serviceIntent)
+                    }
+                },
+                apps = notifyBridgeApps,
+                onAppToggle = { appName, checked ->
+                    val updated = LinkedHashMap(notifyBridgeApps)
+                    updated[appName] = checked
+                    notifyBridgeApps = updated
+                    prefsManager.notifyBridgeApps = updated
+                },
+                darkTheme = darkTheme
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Tray Apps Section
+            Text(
+                text = context.getString(R.string.settings_tray_bridge_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 24.dp, bottom = 8.dp, top = 8.dp),
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            TrayBridgeSettingsCard(
+                enabled = isTrayBridgeEnabled,
+                onEnabledChange = { checked ->
+                    isTrayBridgeEnabled = checked
+                    prefsManager.isTrayBridgeEnabled = checked
+                    if (checked) {
+                        ContextCompat.startForegroundService(
+                            context, Intent(context, NotificationBridgeService::class.java)
+                        )
+                    }
+                },
+                mode = trayBridgeMode,
+                onModeChange = { newMode ->
+                    trayBridgeMode = newMode
+                    prefsManager.trayBridgeMode = newMode
+                },
+                darkTheme = darkTheme
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
 

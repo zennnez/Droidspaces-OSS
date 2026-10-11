@@ -8,4 +8,12 @@
         <item quantity="one">%d session running</item>
         <item quantity="other">%d sessions running</item>
     </plurals>
+    <plurals name="notify_bridge_service_active">
+        <item quantity="one">Watching notifications in %d container</item>
+        <item quantity="other">Watching notifications in %d containers</item>
+    </plurals>
+    <plurals name="tray_summary_title">
+        <item quantity="one">%d app running</item>
+        <item quantity="other">%d apps running</item>
+    </plurals>
 </resources>

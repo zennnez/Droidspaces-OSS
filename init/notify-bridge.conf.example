@@ -1,0 +1,51 @@
+# Droidspaces notification bridge configuration
+# Install to: /etc/ds/notify-bridge.conf (inside the container)
+#
+# This file is written by the Droidspaces Android app whenever the user
+# changes the "Linux Notifications" settings, and re-read by
+# droidspaces-notifyd on startup or on SIGHUP (`pkill -HUP droidspaces-notifyd`).
+
+# Master switch. Mirrors Settings > Linux Notifications > Enabled.
+NOTIFICATION_BRIDGE=true
+
+# One of: all | important | errors-only
+#   all           forward every captured notification
+#   important     forward normal + critical urgency, drop low-urgency
+#   errors-only   forward only critical urgency
+NOTIFICATION_LEVEL=all
+
+# TCP port the daemon listens on inside the container (loopback only).
+NOTIFICATION_BRIDGE_PORT=8942
+
+# Optional additional unix socket, for setups where the Android app
+# reaches the container via a bind-mounted socket path instead of TCP
+# loopback (e.g. NAT net_mode where loopback isn't shared).
+NOTIFICATION_BRIDGE_SOCKET=/run/droidspaces/droidspaces-notify-bridge.sock
+
+NOTIFICATION_BRIDGE_LOG=/var/log/droidspaces/notify-bridge.log
+
+# Per-application allow-list, mirrors Settings > Linux Notifications >
+# Applications. A leading "-" marks an app explicitly unchecked (kept
+# distinct from "not mentioned yet" so unchecking Firefox doesn't fall
+# back to "allow everything" just because it's the only entry). Leave
+# this key out entirely (or empty) to allow every application.
+APPLICATIONS=Firefox,Terminal,-Build tools
+
+# Tray bridge (Syncthing, qBittorrent, VPN clients, and other apps that
+# live in a system tray icon). Mirrors Settings > Linux Notifications >
+# (a separate "Tray Apps" section rendered alongside this one).
+TRAY_BRIDGE=true
+
+# One of: android | xfce | both
+#   android   forward tray state to the Droidspaces Android tray panel.
+#             XFCE's own panel tray (if present) is completely unaffected -
+#             this bridge only ever *observes* it, never replaces it.
+#   xfce      bridge stays connected but idle: nothing is forwarded to
+#             Android, XFCE's native tray remains the only tray. Useful
+#             when you're viewing the desktop directly (e.g. over VNC/X11
+#             forwarding) and don't want duplicate Android-side state.
+#   both      like "android", plus a persistent Android notification-shade
+#             summary of running tray apps, for when the Droidspaces app
+#             itself isn't in the foreground (see requirement: integrate
+#             with Android notifications where a native tray is impossible).
+TRAY_MODE=android
