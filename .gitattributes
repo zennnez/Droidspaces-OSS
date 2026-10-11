@@ -1,0 +1,2 @@
+# Ensure shell scripts always retain Unix LF line endings across Windows/Linux/macOS checkouts
+*.sh text eol=lf
