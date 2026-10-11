@@ -74,7 +74,8 @@ fun SettingsScreen(
     onNavigateToInstallation: () -> Unit = {},
     onNavigateToRequirements: () -> Unit = {},
     onNavigateToAutoBootPriority: () -> Unit = {},
-    onNavigateToTerminalAppearance: () -> Unit = {}
+    onNavigateToTerminalAppearance: () -> Unit = {},
+    onNavigateToAnlandGuide: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
@@ -550,6 +551,37 @@ fun SettingsScreen(
             )
 
             SettingsGroup {
+                ListItem(
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    leadingContent = {
+                        Icon(
+                            imageVector = Icons.Default.DesktopWindows,
+                            contentDescription = null
+                        )
+                    },
+                    headlineContent = {
+                        Text(
+                            text = "Anland Wayland Setup Guide",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    },
+                    supportingContent = {
+                        Text("DRM daemon, companion app, and Wayland steps")
+                    },
+                    trailingContent = {
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = null
+                        )
+                    },
+                    modifier = Modifier.clickable {
+                        onNavigateToAnlandGuide()
+                    }
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
                 ListItem(colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 leadingContent = {
                     Icon(

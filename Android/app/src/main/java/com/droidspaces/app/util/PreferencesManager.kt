@@ -440,6 +440,22 @@ class PreferencesManager private constructor(context: Context) {
             }
         }
 
+    fun getDefaultWaylandDesktop(containerName: String): String {
+        return prefs.getString("default_wayland_desktop_$containerName", "kde_wayland") ?: "kde_wayland"
+    }
+
+    fun setDefaultWaylandDesktop(containerName: String, desktopId: String) {
+        prefs.edit().putString("default_wayland_desktop_$containerName", desktopId).apply()
+    }
+
+    fun getAnlandSelectedKeyboard(containerName: String): String {
+        return prefs.getString("anland_keyboard_$containerName", "kde") ?: "kde"
+    }
+
+    fun setAnlandSelectedKeyboard(containerName: String, keyboardId: String) {
+        prefs.edit().putString("anland_keyboard_$containerName", keyboardId).apply()
+    }
+
     companion object {
         private const val PREFS_NAME = Constants.PREFS_NAME
         private const val KEY_SETUP_COMPLETED = Constants.KEY_SETUP_COMPLETED

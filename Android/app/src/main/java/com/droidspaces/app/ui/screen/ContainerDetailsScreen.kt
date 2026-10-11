@@ -42,8 +42,14 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.LifecycleOwner
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import com.droidspaces.app.util.ContainerSnapshotManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Premium Container Details Screen - Zero glitches, buttery smooth animations
@@ -61,7 +67,15 @@ fun ContainerDetailsScreen(
     container: ContainerInfo,
     onNavigateBack: () -> Unit,
     onNavigateToServices: (InitSystem) -> Unit = {},
-    onNavigateToTerminal: () -> Unit = {}
+    onNavigateToTerminal: () -> Unit = {},
+    onNavigateToTerminalWithCommand: (String) -> Unit = {},
+    onNavigateToDiskUsage: () -> Unit = {},
+    onNavigateToSnapshots: () -> Unit = {},
+    onNavigateToWireless: () -> Unit = {},
+    onNavigateToScrcpy: () -> Unit = {},
+    onNavigateToAnland: () -> Unit = {},
+    onNavigateToTurnip: () -> Unit = {},
+    onNavigateToAnlandGuide: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -166,103 +180,157 @@ fun ContainerDetailsScreen(
         },
         snackbarHost = { DsSnackbarHost(snackbarHostState) }
     ) { padding ->
-        LazyColumn(
+        var showMoreSheet by remember { mutableStateOf(false) }
+
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(padding)
         ) {
-            // OS Information - Total Rewrite (Zero Shadow / Flat Design)
-            item(key = "os_info_flat_grid_${container.name}") {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 88.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // OS Information - Total Rewrite (Zero Shadow / Flat Design)
+                item(key = "os_info_flat_grid_${container.name}") {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
                     ) {
-                        // Header Row
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = context.getString(R.string.container_info),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
+                            // Header Row
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = context.getString(R.string.container_info),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
 
-                        osInfo?.let { info ->
-                            // Dynamic Height Synced Grid - measure all 6 and find max.
-                            // Built once per (osInfo, running) instead of every recomposition
-                            // (this block re-fires on the 2s OS-info poll).
-                            val tokens = remember(info, container.isRunning) { mutableListOf<@Composable () -> Unit>().apply {
-                                add { IdentityToken(context.getString(R.string.distribution), info.prettyName ?: info.name ?: "Linux", IconUtils.getDistroIcon(info.prettyName ?: info.name), MaterialTheme.colorScheme.primary) }
-                                add { IdentityToken(context.getString(R.string.hostname), info.hostname ?: "localhost", rememberVectorPainter(image = Icons.Default.Computer), MaterialTheme.colorScheme.secondary) }
-                                add { IdentityToken(context.getString(R.string.uptime), info.uptime ?: "0s", rememberVectorPainter(image = Icons.Default.Timer), MaterialTheme.colorScheme.tertiary) }
-                                add { IdentityToken(context.getString(R.string.ip_address), info.ipAddress ?: "127.0.0.1", rememberVectorPainter(image = Icons.Default.Lan), MaterialTheme.colorScheme.outline) }
-                                if (container.isRunning) {
-                                    add { IdentityToken(context.getString(R.string.cpu_usage_label), info.cpuUsage?.let { context.getString(R.string.cpu_percent_label, it) } ?: "---", rememberVectorPainter(image = Icons.Default.Speed), MaterialTheme.colorScheme.primary) }
-                                    add { IdentityToken(context.getString(R.string.ram_usage_label), info.ramLabel(context) ?: "---", rememberVectorPainter(image = Icons.Default.Memory), MaterialTheme.colorScheme.secondary) }
-                                }
-                            } }
+                            osInfo?.let { info ->
+                                // Dynamic Height Synced Grid - measure all 6 and find max.
+                                // Built once per (osInfo, running) instead of every recomposition
+                                // (this block re-fires on the 2s OS-info poll).
+                                val tokens = remember(info, container.isRunning) { mutableListOf<@Composable () -> Unit>().apply {
+                                    add { IdentityToken(context.getString(R.string.distribution), info.prettyName ?: info.name ?: "Linux", IconUtils.getDistroIcon(info.prettyName ?: info.name), MaterialTheme.colorScheme.primary) }
+                                    add { IdentityToken(context.getString(R.string.hostname), info.hostname ?: "localhost", rememberVectorPainter(image = Icons.Default.Computer), MaterialTheme.colorScheme.secondary) }
+                                    add { IdentityToken(context.getString(R.string.uptime), info.uptime ?: "0s", rememberVectorPainter(image = Icons.Default.Timer), MaterialTheme.colorScheme.tertiary) }
+                                    add { IdentityToken(context.getString(R.string.ip_address), info.ipAddress ?: "127.0.0.1", rememberVectorPainter(image = Icons.Default.Lan), MaterialTheme.colorScheme.outline) }
+                                    if (container.isRunning) {
+                                        add { IdentityToken(context.getString(R.string.cpu_usage_label), info.cpuUsage?.let { context.getString(R.string.cpu_percent_label, it) } ?: "---", rememberVectorPainter(image = Icons.Default.Speed), MaterialTheme.colorScheme.primary) }
+                                        add { IdentityToken(context.getString(R.string.ram_usage_label), info.ramLabel(context) ?: "---", rememberVectorPainter(image = Icons.Default.Memory), MaterialTheme.colorScheme.secondary) }
+                                    }
+                                } }
 
-                            SyncedGrid(items = tokens)
-                        } ?: Box(
-                            modifier = Modifier.fillMaxWidth().height(100.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = context.getString(R.string.unable_to_read_container_info),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                                SyncedGrid(items = tokens)
+                            } ?: Box(
+                                modifier = Modifier.fillMaxWidth().height(100.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = context.getString(R.string.unable_to_read_container_info),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            // Disk Usage Card - only for sparse-image containers (shows rootfs.img footprint)
-            if (container.useSparseImage) {
-                item(key = "diskusage_${container.name}") {
-                    SparseDiskUsageCard(usage = diskUsage)
+                // Disk Usage Card - only for sparse-image containers (shows rootfs.img footprint)
+                if (container.useSparseImage) {
+                    item(key = "diskusage_${container.name}") {
+                        SparseDiskUsageCard(
+                            usage = diskUsage,
+                            onClick = onNavigateToDiskUsage
+                        )
+                    }
+                }
+
+                // Users Card - Stable key (don't include refreshTrigger to prevent recreation)
+                item(key = "users_${container.name}") {
+                    ContainerUsersCard(
+                        containerName = container.name,
+                        refreshTrigger = refreshTrigger,
+                        snackbarHostState = snackbarHostState
+                    )
+                }
+
+                item(key = "terminal_${container.name}") {
+                    TerminalCard(
+                        containerName = container.name,
+                        onOpenTerminal = onNavigateToTerminal
+                    )
+                }
+
+                item(key = "systemd_${container.name}") {
+                    PremiumInitSystemCard(
+                        state = initSystemState,
+                        onNavigateToServices = onNavigateToServices
+                    )
+                }
+
+                // Snapshots & Rollback Card
+                item(key = "snapshots_${container.name}") {
+                    SnapshotsSummaryCard(
+                        container = container,
+                        refreshTrigger = refreshTrigger,
+                        onOpen = onNavigateToSnapshots
+                    )
                 }
             }
 
-            // Users Card - Stable key (don't include refreshTrigger to prevent recreation)
-            item(key = "users_${container.name}") {
-                ContainerUsersCard(
-                    containerName = container.name,
-                    refreshTrigger = refreshTrigger,
-                    snackbarHostState = snackbarHostState
-                )
-            }
+            ExtendedFloatingActionButton(
+                onClick = { showMoreSheet = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(end = 24.dp, bottom = 24.dp),
+                shape = RoundedCornerShape(20.dp),
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.Widgets,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                text = {
+                    Text(
+                        text = "More",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            )
+        }
 
-            item(key = "terminal_${container.name}") {
-                TerminalCard(
-                    containerName = container.name,
-                    onOpenTerminal = onNavigateToTerminal
-                )
-            }
-
-            item(key = "systemd_${container.name}") {
-                PremiumInitSystemCard(
-                    state = initSystemState,
-                    onNavigateToServices = onNavigateToServices
-                )
-            }
+        if (showMoreSheet) {
+            MoreToolsBottomSheet(
+                container = container,
+                onDismiss = { showMoreSheet = false },
+                onNavigateToAnland = onNavigateToAnland,
+                onNavigateToTurnip = onNavigateToTurnip,
+                onNavigateToWireless = onNavigateToWireless,
+                onNavigateToScrcpy = onNavigateToScrcpy
+            )
         }
     }
 }
@@ -472,6 +540,7 @@ private fun TerminalCard(
 @Composable
 private fun SparseDiskUsageCard(
     usage: ContainerDiskUsageManager.DiskUsage?,
+    onClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -499,7 +568,8 @@ private fun SparseDiskUsageCard(
             .fillMaxWidth()
             .heightIn(min = 88.dp)
             .alpha(alpha)
-            .graphicsLayer { this.alpha = alpha },
+            .graphicsLayer { this.alpha = alpha }
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
@@ -520,7 +590,7 @@ private fun SparseDiskUsageCard(
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.primary
                 )
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = context.getString(R.string.disk_usage),
                         style = MaterialTheme.typography.titleMedium,
@@ -540,6 +610,12 @@ private fun SparseDiskUsageCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 }
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
             }
 
             LinearProgressIndicator(
@@ -739,3 +815,265 @@ private fun SyncedGrid(
         }
     }
 }
+
+/**
+ * Small, uniform summary card shared by Snapshots and other container services.
+ */
+@Composable
+private fun FeatureSummaryCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    statusText: String,
+    statusColor: Color,
+    description: String,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = AnimationUtils.cardFadeSpec(),
+        label = "${title}_summary_card_fade"
+    )
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 88.dp)
+            .alpha(alpha)
+            .graphicsLayer { this.alpha = alpha }
+            .clickable(onClick = onOpen),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(statusColor)
+                        )
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = statusColor
+                        )
+                    }
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                }
+            }
+
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SnapshotsSummaryCard(
+    container: ContainerInfo,
+    refreshTrigger: Int,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var count by remember(container.name, refreshTrigger) { mutableIntStateOf(0) }
+
+    LaunchedEffect(container.name, refreshTrigger) {
+        val list = withContext(Dispatchers.IO) {
+            ContainerSnapshotManager.listSnapshots(container)
+        }
+        count = list.size
+    }
+
+    FeatureSummaryCard(
+        icon = Icons.Default.History,
+        title = "Snapshots & Rollback",
+        statusText = if (count == 0) "No Snapshots" else "$count Saved",
+        statusColor = if (count > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        description = "Create instant recovery points and rollback container state",
+        onOpen = onOpen,
+        modifier = modifier
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MoreToolsBottomSheet(
+    container: ContainerInfo,
+    onDismiss: () -> Unit,
+    onNavigateToAnland: () -> Unit,
+    onNavigateToTurnip: () -> Unit,
+    onNavigateToWireless: () -> Unit,
+    onNavigateToScrcpy: () -> Unit,
+    onNavigateToFileSharing: () -> Unit = {},
+    onNavigateToDocker: () -> Unit = {},
+    onNavigateToTailscale: () -> Unit = {},
+    onNavigateToPackages: () -> Unit = {},
+    onNavigateToPrograms: () -> Unit = {},
+    onNavigateToAliases: () -> Unit = {},
+    onNavigateToCaddy: () -> Unit = {},
+    onNavigateToNetworkDiscovery: () -> Unit = {},
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    data class MoreToolEntry(
+        val title: String,
+        val description: String,
+        val icon: androidx.compose.ui.graphics.vector.ImageVector,
+        val isVisible: Boolean = true,
+        val onClick: () -> Unit
+    )
+
+    val tools = remember(container) {
+        listOf(
+            MoreToolEntry(
+                title = "Anland Wayland Display",
+                description = "Wayland socket server, DRM rendering & compositor settings",
+                icon = Icons.Default.DesktopWindows,
+                isVisible = container.enableAnland,
+                onClick = onNavigateToAnland
+            ),
+            MoreToolEntry(
+                title = "Adreno Turnip GPU Drivers",
+                description = "Mesa Freedreno Vulkan drivers & Turnip environment",
+                icon = Icons.Default.Speed,
+                onClick = onNavigateToTurnip
+            ),
+            MoreToolEntry(
+                title = "Wireless Display (VNC & Stream)",
+                description = "Remote desktop viewing via VNC server or H.264 video stream",
+                icon = Icons.Default.Cast,
+                isVisible = container.wirelessDisplayEnabled || container.isRunning,
+                onClick = onNavigateToWireless
+            ),
+            MoreToolEntry(
+                title = "Scrcpy Screen Mirroring",
+                description = "Mirror & control Android screen inside container session",
+                icon = Icons.Default.PhoneAndroid,
+                isVisible = container.scrcpyEnabled || container.isRunning,
+                onClick = onNavigateToScrcpy
+            )
+        ).filter { it.isVisible }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        dragHandle = {
+            BottomSheetDefaults.DragHandle(
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(tools.size) { index ->
+                    val item = tools[index]
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                item.onClick()
+                            },
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = item.icon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = item.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = item.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                    )
+                                }
+                            }
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

@@ -21,6 +21,10 @@ import com.droidspaces.app.util.FilePickerUtils
 import com.droidspaces.app.util.PreferencesManager
 import com.droidspaces.app.util.SystemInfoManager
 import com.droidspaces.app.util.ViewModelLogger
+import com.droidspaces.app.util.AnlandUtils
+import com.droidspaces.app.util.Constants
+import com.droidspaces.app.util.ContainerEnvironmentManager
+import com.droidspaces.app.util.ScrcpyManager
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -779,6 +783,819 @@ class ContainerOperationsViewModel(app: Application) : AndroidViewModel(app) {
             }
         } catch (e: Exception) {
             onError("Error deleting snapshot: ${e.message}")
+        }
+    }
+
+    // ── Turnip GPU Auto-Installation ─────────────────────────────────────────
+    suspend fun executeInstallTurnipDrivers(
+        container: ContainerInfo,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        runningOperationContainer = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+        showLogViewerFor = container.name
+
+        try {
+            val isRunning = ContainerManager.checkContainerStatus(container.name).first
+            if (!isRunning) {
+                logger.i("Starting container '${container.name}' to install GPU drivers...")
+                val startCommand = ContainerCommandBuilder.buildStartCommand(container)
+                val startResult = ContainerOperationExecutor.executeCommand(startCommand, "start", logger)
+                if (!startResult) {
+                    logger.e("Failed to start container '${container.name}'.")
+                    onError("Failed to start container")
+                    return
+                }
+                delay(1000)
+            }
+
+            logger.i("Deploying Adreno Turnip GPU Driver Auto-Installer...")
+            val scriptContent = appContext.assets.open("install_turnip.sh").bufferedReader().use { it.readText() }
+            val b64 = android.util.Base64.encodeToString(scriptContent.toByteArray(), android.util.Base64.NO_WRAP)
+            val cmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} run 'echo $b64 | base64 -d | sh'"
+
+            val success = ContainerOperationExecutor.executeCommand(
+                command = cmd,
+                operation = "install_turnip",
+                logger = logger,
+                skipHeader = true,
+                operationCompletedMessage = "Adreno Turnip GPU drivers installed successfully"
+            )
+
+            if (success) {
+                logger.i("Updating container hardware configuration...")
+                var env = container.envFileContent.orEmpty()
+                if (!env.contains("MESA_LOADER_DRIVER_OVERRIDE=")) {
+                    env = if (env.isBlank()) "MESA_LOADER_DRIVER_OVERRIDE=kgsl" else "$env\nMESA_LOADER_DRIVER_OVERRIDE=kgsl"
+                }
+                if (!env.contains("TU_DEBUG=")) {
+                    env = if (env.isBlank()) "TU_DEBUG=noconform" else "$env\nTU_DEBUG=noconform"
+                }
+                val updated = container.copy(
+                    enableGpuMode = true,
+                    enableTermuxX11 = true,
+                    enableVirgl = false,
+                    envFileContent = env
+                )
+                withContext(Dispatchers.IO) {
+                    ContainerManager.updateContainerConfig(appContext, container.name, updated)
+                }
+                logger.i("Hardware configuration updated ✓")
+                onSuccess("Turnip GPU drivers installed and configured successfully")
+            } else {
+                logger.e("Turnip driver installation failed.")
+                onError("Failed to install Turnip GPU drivers")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error installing GPU drivers: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeInstallScrcpy(
+        container: ContainerInfo,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Install scrcpy and ADB in container '${container.name}' ===")
+            if (!container.isRunning) {
+                logger.i("Container is stopped. Starting container...")
+                val startCommand = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} start"
+                val startResult = ContainerOperationExecutor.executeCommand(startCommand, "start", logger)
+                if (!startResult) {
+                    logger.e("Failed to start container '${container.name}'.")
+                    onError("Failed to start container")
+                    return
+                }
+                delay(1000)
+            }
+
+            logger.i("Deploying scrcpy control script...")
+            val scriptContent = appContext.assets.open("scrcpy-setup.sh").bufferedReader().use { it.readText() }
+                .replace("\r\n", "\n").replace("\r", "\n")
+            val b64 = android.util.Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val installCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run 'mkdir -p /usr/local/sbin && echo \"$b64\" | base64 -d > /usr/local/sbin/droidspaces-scrcpy && " +
+                "chmod 755 /usr/local/sbin/droidspaces-scrcpy && /usr/local/sbin/droidspaces-scrcpy install'"
+
+            val success = ContainerOperationExecutor.executeCommand(installCmd, "install_scrcpy", logger)
+            if (success) {
+                logger.i("scrcpy and ADB installed successfully ✓")
+                onSuccess("scrcpy installed successfully")
+            } else {
+                logger.e("Failed to install scrcpy")
+                onError("Failed to install scrcpy")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error installing scrcpy: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeLaunchScrcpy(
+        container: ContainerInfo,
+        noAudio: Boolean = false,
+        turnScreenOff: Boolean = false,
+        stayAwake: Boolean = false,
+        maxFps: Int = 0,
+        extraArgs: String = "",
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Launch scrcpy loopback mirroring in container '${container.name}' ===")
+            if (!container.isRunning) {
+                logger.i("Container is stopped. Starting container...")
+                val startCommand = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} start"
+                val startResult = ContainerOperationExecutor.executeCommand(startCommand, "start", logger)
+                if (!startResult) {
+                    logger.e("Failed to start container '${container.name}'.")
+                    onError("Failed to start container")
+                    return
+                }
+                delay(1000)
+            }
+
+            logger.i("1. Ensuring host ADB is running on TCP port ${Constants.SCRCPY_ADB_PORT}...")
+            val adbRes = ScrcpyManager.ensureAdbTcpip(Constants.SCRCPY_ADB_PORT)
+            if (!adbRes.isSuccess) {
+                logger.e("Failed to enable ADB TCP/IP mode on host: ${adbRes.message}")
+                onError("Failed to enable ADB TCP/IP mode")
+                return
+            }
+            logger.i("  Host ADB TCP/IP active ✓")
+
+            logger.i("2. Pre-authorizing container ADB key...")
+            ScrcpyManager.authorizeContainerAdbKey(container.name)
+            logger.i("  Container ADB key authorized ✓")
+
+            logger.i("3. Deploying and launching scrcpy inside desktop session...")
+            val scriptContent = appContext.assets.open("scrcpy-setup.sh").bufferedReader().use { it.readText() }
+                .replace("\r\n", "\n").replace("\r", "\n")
+            val b64 = android.util.Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val launchCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run 'mkdir -p /usr/local/sbin && echo \"$b64\" | base64 -d > /usr/local/sbin/droidspaces-scrcpy && " +
+                "chmod 755 /usr/local/sbin/droidspaces-scrcpy && " +
+                "/usr/local/sbin/droidspaces-scrcpy launch ${Constants.SCRCPY_ADB_PORT} ${container.scrcpyMaxSize} ${container.scrcpyBitrateKbps} " +
+                "${if (noAudio) "1" else "0"} ${if (turnScreenOff) "1" else "0"} ${if (stayAwake) "1" else "0"} $maxFps ${ContainerCommandBuilder.quote(extraArgs)}'"
+
+            val success = ContainerOperationExecutor.executeCommand(launchCmd, "launch_scrcpy", logger)
+            if (success) {
+                logger.i("scrcpy mirroring launched successfully ✓")
+                onSuccess("scrcpy launched successfully")
+            } else {
+                logger.e("Failed to launch scrcpy")
+                onError("Failed to launch scrcpy")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error launching scrcpy: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeStopScrcpy(
+        container: ContainerInfo,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Stop scrcpy in container '${container.name}' ===")
+            val stopCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run '/usr/local/sbin/droidspaces-scrcpy stop-now'"
+            val success = ContainerOperationExecutor.executeCommand(stopCmd, "stop_scrcpy", logger)
+            if (success) {
+                logger.i("scrcpy stopped ✓")
+                onSuccess("scrcpy stopped successfully")
+            } else {
+                logger.e("Failed to stop scrcpy")
+                onError("Failed to stop scrcpy")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error stopping scrcpy: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeInstallAnlandKde(
+        container: ContainerInfo,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        runningOperationContainer = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+        try {
+            showLogViewerFor = container.name
+            logger.i("Installing Anland KDE Desktop Environment in container '${container.name}'...")
+            val cmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} run '${AnlandUtils.INSTALL_COMMAND}'"
+            val success = ContainerOperationExecutor.executeCommand(cmd, "install_anland_kde", logger, skipHeader = true)
+            if (success) {
+                logger.i("Anland KDE installed successfully ✓")
+                onSuccess("Anland KDE installed successfully")
+            } else {
+                logger.e("Failed to install Anland KDE")
+                onError("Failed to install Anland KDE")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeInstallWaylandDesktop(
+        container: ContainerInfo,
+        desktopName: String,
+        installCommand: String,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        runningOperationContainer = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+        try {
+            showLogViewerFor = container.name
+            logger.i("Installing $desktopName Desktop in container '${container.name}'...")
+            val b64 = android.util.Base64.encodeToString(installCommand.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val cmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} run 'echo $b64 | base64 -d | sh'"
+            val success = ContainerOperationExecutor.executeCommand(cmd, "install_desktop", logger, skipHeader = true)
+            if (success) {
+                logger.i("$desktopName installed successfully ✓")
+                onSuccess("$desktopName installed successfully")
+            } else {
+                logger.e("Failed to install $desktopName")
+                onError("Failed to install $desktopName")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeInstallUsbManager(
+        container: ContainerInfo,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        runningOperationContainer = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+        try {
+            showLogViewerFor = container.name
+            logger.i("Installing Droidspaces USB Manager in container '${container.name}'...")
+            val scriptContent = appContext.assets.open("install-usb-manager.sh").bufferedReader().use { it.readText() }
+                .replace("\r\n", "\n").replace("\r", "\n")
+            val b64 = android.util.Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val userArg = if (container.defaultUsername.isNotBlank()) " --user ${container.defaultUsername}" else ""
+            val cmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} run 'echo $b64 | base64 -d | bash -s --$userArg'"
+            val success = ContainerOperationExecutor.executeCommand(cmd, "install_usb_manager", logger, skipHeader = true)
+            if (success) {
+                logger.i("USB Manager installed successfully ✓")
+                onSuccess("USB Manager installed successfully")
+            } else {
+                logger.e("Failed to install USB Manager")
+                onError("Failed to install USB Manager")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeInstallKdeKeyboard(
+        container: ContainerInfo,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        runningOperationContainer = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+        try {
+            showLogViewerFor = container.name
+            logger.i("Installing KDE Plasma Virtual Keyboard in container '${container.name}'...")
+            val isRunning = ContainerManager.checkContainerStatus(container.name).first
+            if (!isRunning) {
+                logger.i("Starting container '${container.name}'...")
+                val startCommand = ContainerCommandBuilder.buildStartCommand(container)
+                val startResult = ContainerOperationExecutor.executeCommand(startCommand, "start", logger)
+                if (!startResult) {
+                    logger.e("Failed to start container '${container.name}'.")
+                    onError("Failed to start container")
+                    return
+                }
+                delay(1000)
+            }
+            val scriptContent = appContext.assets.open("install-kde-keyboard.sh").bufferedReader().use { it.readText() }
+                .replace("\r\n", "\n").replace("\r", "\n")
+            val b64 = android.util.Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val cmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} run 'echo $b64 | base64 -d | sh'"
+            val success = ContainerOperationExecutor.executeCommand(cmd, "install_kde_keyboard", logger, skipHeader = true)
+            if (success) {
+                logger.i("KDE Plasma Virtual Keyboard installed successfully ✓")
+                onSuccess("KDE Plasma Keyboard installed successfully")
+            } else {
+                logger.e("Failed to install KDE Plasma Keyboard")
+                onError("Failed to install KDE Plasma Keyboard")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeInstallVboard(
+        container: ContainerInfo,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        runningOperationContainer = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+        try {
+            showLogViewerFor = container.name
+            logger.i("Installing vboard Virtual Keyboard in container '${container.name}'...")
+            val isRunning = ContainerManager.checkContainerStatus(container.name).first
+            if (!isRunning) {
+                logger.i("Starting container '${container.name}'...")
+                val startCommand = ContainerCommandBuilder.buildStartCommand(container)
+                val startResult = ContainerOperationExecutor.executeCommand(startCommand, "start", logger)
+                if (!startResult) {
+                    logger.e("Failed to start container '${container.name}'.")
+                    onError("Failed to start container")
+                    return
+                }
+                delay(1000)
+            }
+            val scriptContent = appContext.assets.open("install-vboard.sh").bufferedReader().use { it.readText() }
+                .replace("\r\n", "\n").replace("\r", "\n")
+            val b64 = android.util.Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val cmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} run 'echo $b64 | base64 -d | sh'"
+            val success = ContainerOperationExecutor.executeCommand(cmd, "install_vboard", logger, skipHeader = true)
+            if (success) {
+                logger.i("vboard Virtual Keyboard installed successfully ✓")
+                onSuccess("vboard installed successfully")
+            } else {
+                logger.e("Failed to install vboard")
+                onError("Failed to install vboard")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeConfigureAnlandKeyboard(
+        container: ContainerInfo,
+        keyboardType: String,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        val logs = logsFor(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+        try {
+            val isRunning = ContainerManager.checkContainerStatus(container.name).first
+            if (isRunning) {
+                val script = if (keyboardType == "kde") {
+                    "mkdir -p /etc/profile.d /etc/xdg/autostart && " +
+                    "printf 'export QT_IM_MODULE=maliitph\\nexport XMODIFIERS=@im=maliit\\n' > /etc/profile.d/anland_keyboard.sh && " +
+                    "[ -f /etc/xdg/autostart/vboard.desktop ] && sed -i 's/Hidden=false/Hidden=true/g' /etc/xdg/autostart/vboard.desktop || true; " +
+                    "[ -f /etc/xdg/autostart/kde-virtual-keyboard.desktop ] && sed -i 's/Hidden=true/Hidden=false/g' /etc/xdg/autostart/kde-virtual-keyboard.desktop || true"
+                } else {
+                    "mkdir -p /etc/profile.d /etc/xdg/autostart && " +
+                    "printf 'export WAYLAND_KEYBOARD=vboard\\n' > /etc/profile.d/anland_keyboard.sh && " +
+                    "[ -f /etc/xdg/autostart/kde-virtual-keyboard.desktop ] && sed -i 's/Hidden=false/Hidden=true/g' /etc/xdg/autostart/kde-virtual-keyboard.desktop || true; " +
+                    "[ -f /etc/xdg/autostart/vboard.desktop ] && sed -i 's/Hidden=true/Hidden=false/g' /etc/xdg/autostart/vboard.desktop || true"
+                }
+                val cmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} run '$script'"
+                ContainerOperationExecutor.executeCommand(cmd, "config_keyboard", logger, skipHeader = true)
+            }
+            onSuccess("Active keyboard set to ${if (keyboardType == "kde") "KDE Plasma Keyboard" else "vboard"} ✓")
+            onRefresh()
+        } catch (e: Exception) {
+            onError("Error: ${e.message}")
+        }
+    }
+
+    suspend fun executeAutoConfigureAnlandEnvironment(
+        container: ContainerInfo,
+        hasSnapdragonFix: Boolean,
+        selectedDesktopServiceName: String? = null,
+        selectedDesktopStartCommand: String? = null,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        runningOperationContainer = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+        showLogViewerFor = container.name
+
+        try {
+            val isRunning = ContainerManager.checkContainerStatus(container.name).first
+            if (!isRunning) {
+                logger.i("Starting container '${container.name}' to configure environment...")
+                val startCommand = ContainerCommandBuilder.buildStartCommand(container)
+                val startResult = ContainerOperationExecutor.executeCommand(startCommand, "start", logger)
+                if (!startResult) {
+                    logger.e("Failed to start container '${container.name}'.")
+                    onError("Failed to start container")
+                    return
+                }
+                delay(1000)
+            }
+
+            logger.i("Configuring Wayland and Anland environment variables in .anland.env...")
+            val anlandEnv = buildString {
+                appendLine("XCURSOR_SIZE=48")
+                appendLine("WAYLAND_DISPLAY=wayland-0")
+                appendLine("QT_QPA_PLATFORM=wayland")
+                appendLine("QT_AUTO_SCREEN_SCALE_FACTOR=1")
+                appendLine("GDK_BACKEND=wayland,x11")
+                appendLine("CLUTTER_BACKEND=wayland")
+                appendLine("SDL_VIDEODRIVER=wayland")
+                appendLine("XDG_SESSION_TYPE=wayland")
+                appendLine("MOZ_ENABLE_WAYLAND=1")
+                appendLine("ANLAND=1")
+                appendLine("ANLAND_SOCKET=/run/display.sock")
+                appendLine("ANLAND_DRM_DEVICE=/dev/dri/renderD128")
+                appendLine("XWAYLAND_GBM_DEVICE=/dev/dri/renderD128")
+                appendLine("MESA_LOADER_DRIVER_OVERRIDE=kgsl")
+                appendLine("GALLIUM_DRIVER=kgsl")
+                appendLine("FD_FORCE_KGSL=1")
+                if (hasSnapdragonFix) {
+                    appendLine("FD_DEV_FEATURES=enable_tp_ubwc_flag_hint=1")
+                    appendLine("TU_DEBUG=noconform")
+                }
+            }.trim()
+
+            ContainerEnvironmentManager.saveAnlandEnv(
+                context = appContext,
+                containerName = container.name,
+                content = anlandEnv
+            )
+            val success = ContainerEnvironmentManager.syncToContainer(appContext, container.name)
+            logger.i("Synced modular environment to /etc/environment:")
+            logger.i(anlandEnv)
+
+            val profileScript = """
+                mkdir -p /etc/profile.d 2>/dev/null || true
+                cat > /etc/profile.d/anland.sh <<'EOF'
+[ -z "${'$'}WAYLAND_DISPLAY" ] && export WAYLAND_DISPLAY=wayland-0
+[ -z "${'$'}QT_QPA_PLATFORM" ] && export QT_QPA_PLATFORM=wayland
+[ -z "${'$'}ANLAND" ] && export ANLAND=1
+[ -z "${'$'}ANLAND_SOCKET" ] && export ANLAND_SOCKET=/run/display.sock
+[ -z "${'$'}ANLAND_DRM_DEVICE" ] && export ANLAND_DRM_DEVICE=/dev/dri/renderD128
+_UID="${'$'}(id -u 2>/dev/null)"
+_UN="${'$'}(id -un 2>/dev/null || echo user)"
+if [ -d "/run/user/${'$'}_UID" ]; then
+    export XDG_RUNTIME_DIR="/run/user/${'$'}_UID"
+elif mkdir -p -m 0700 "/run/user/${'$'}_UID" 2>/dev/null; then
+    export XDG_RUNTIME_DIR="/run/user/${'$'}_UID"
+else
+    export XDG_RUNTIME_DIR="/tmp/runtime-${'$'}_UN"
+    mkdir -p -m 0700 "${'$'}XDG_RUNTIME_DIR" 2>/dev/null || true
+fi
+ln -sfn "${'$'}XDG_RUNTIME_DIR" "/tmp/runtime-${'$'}_UN" 2>/dev/null || true
+EOF
+                chmod 0755 /etc/profile.d/anland.sh 2>/dev/null || true
+
+                # Sanitize /etc/environment: remove any bad export keywords or stale DISPLAY / modifier overrides
+                sed -i 's/^[[:space:]]*export[[:space:]]\+//g' /etc/environment 2>/dev/null || true
+                sed -i '/^export /d' /etc/environment 2>/dev/null || true
+                sed -i '/^XDG_RUNTIME_DIR=/d' /etc/environment 2>/dev/null || true
+                sed -i '/^DISPLAY=/d' /etc/environment 2>/dev/null || true
+                sed -i '/^KWIN_DRM_USE_MODIFIERS=/d' /etc/environment 2>/dev/null || true
+
+                # Permissions
+                chmod 1777 /tmp 2>/dev/null || true
+                mkdir -p -m 1777 /tmp/.X11-unix /tmp/.ICE-unix 2>/dev/null || true
+                chmod 0666 /dev/dri/renderD128 /dev/dri/card* /dev/kgsl-3d0 2>/dev/null || true
+                chmod 0777 /run/display.sock 2>/dev/null || true
+
+                # Unlock users and fix group memberships + ~/.bashrc
+                for u in ${'$'}(awk -F: '${'$'}3 >= 1000 && ${'$'}3 < 65534 {print ${'$'}1}' /etc/passwd 2>/dev/null); do
+                    uid_num=${'$'}(id -u "${'$'}u" 2>/dev/null)
+                    [ -z "${'$'}uid_num" ] && continue
+                    usermod -aG shadow,video,render,audio "${'$'}u" 2>/dev/null || true
+                    if grep -q "^${'$'}u:!" /etc/shadow 2>/dev/null; then
+                        echo "${'$'}u:1234" | chpasswd 2>/dev/null || true
+                    fi
+                    mkdir -p -m 0755 /run/user 2>/dev/null || true
+                    mkdir -p -m 0700 "/run/user/${'$'}uid_num" "/tmp/runtime-${'$'}u" 2>/dev/null || true
+                    chown -R "${'$'}u:${'$'}u" "/run/user/${'$'}uid_num" "/tmp/runtime-${'$'}u" 2>/dev/null || true
+                    chmod 0700 "/run/user/${'$'}uid_num" "/tmp/runtime-${'$'}u" 2>/dev/null || true
+                    ln -sfn "/run/user/${'$'}uid_num" "/tmp/runtime-${'$'}u" 2>/dev/null || true
+
+                    if [ -f "/home/${'$'}u/.bashrc" ]; then
+                        sed -i '/^export XDG_RUNTIME_DIR=\/tmp/d' "/home/${'$'}u/.bashrc" 2>/dev/null || true
+                        grep -q "XDG_RUNTIME_DIR=" "/home/${'$'}u/.bashrc" 2>/dev/null || echo 'export XDG_RUNTIME_DIR=/run/user/${'$'}(id -u)' >> "/home/${'$'}u/.bashrc"
+                        chown "${'$'}u:${'$'}u" "/home/${'$'}u/.bashrc" 2>/dev/null || true
+                    fi
+                done
+
+                # Install noctalia-launch wrapper
+                cat > /usr/local/bin/noctalia-launch <<'EOF_LAUNCH'
+#!/bin/bash
+if [ -z "${'$'}XDG_RUNTIME_DIR" ]; then
+    if [ -d "/run/user/${'$'}(id -u 2>/dev/null)" ]; then
+        export XDG_RUNTIME_DIR="/run/user/${'$'}(id -u 2>/dev/null)"
+    elif [ -d "/tmp/runtime-${'$'}(id -un 2>/dev/null)" ]; then
+        export XDG_RUNTIME_DIR="/tmp/runtime-${'$'}(id -un 2>/dev/null)"
+    elif [ -d "/run/user/1000" ]; then
+        export XDG_RUNTIME_DIR="/run/user/1000"
+    else
+        export XDG_RUNTIME_DIR="/tmp/runtime-${'$'}(id -un 2>/dev/null || echo user)"
+        mkdir -p -m 0700 "${'$'}XDG_RUNTIME_DIR" 2>/dev/null || true
+    fi
+fi
+
+for i in ${'$'}(seq 1 120); do
+    for sock in "${'$'}XDG_RUNTIME_DIR"/wayland-* /run/user/*/wayland-* /tmp/runtime-*/wayland-*; do
+        [ -e "${'$'}sock" ] || continue
+        case "${'$'}sock" in *.lock) continue ;; esac
+        [ -S "${'$'}sock" ] || continue
+        export XDG_RUNTIME_DIR="${'$'}(dirname "${'$'}sock")"
+        export WAYLAND_DISPLAY="${'$'}(basename "${'$'}sock")"
+        exec /usr/local/bin/noctalia
+    done
+    sleep 1
+done
+exit 1
+EOF_LAUNCH
+                chmod +x /usr/local/bin/noctalia-launch 2>/dev/null || true
+            """.trimIndent()
+            val b64Profile = android.util.Base64.encodeToString(profileScript.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val profileCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} run 'echo $b64Profile | base64 -d | sh'"
+            Shell.cmd(profileCmd).exec()
+
+            val sName = selectedDesktopServiceName ?: "plasma-wayland.service"
+            val configuredUser = container.defaultUsername.ifBlank { container.sshUser }
+            val svcScript = when (sName) {
+                "plasma-wayland.service", "plasma-mobile.service" -> {
+                    val binary = if (sName == "plasma-mobile.service") "startplasmamobile" else "startplasma-wayland"
+                    """
+                        TARGET_USER="${configuredUser}"
+                        if [ -z "${'$'}TARGET_USER" ]; then
+                            TARGET_USER=${'$'}(awk -F: '${'$'}3 >= 1000 && ${'$'}3 < 65534 {print ${'$'}1; exit}' /etc/passwd 2>/dev/null || echo "1000")
+                        fi
+                        [ -z "${'$'}TARGET_USER" ] && TARGET_USER="1000"
+
+                        mkdir -p /etc/systemd/system 2>/dev/null || true
+                        cat > "/etc/systemd/system/$sName" <<EOF
+[Unit]
+Description=Start $sName
+After=network.target display-manager.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=${'$'}TARGET_USER
+PAMName=login
+EnvironmentFile=-/etc/environment
+ExecStart=/bin/bash -lc '$binary'
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                        chmod 644 "/etc/systemd/system/$sName"
+                        if command -v systemctl >/dev/null 2>&1; then
+                            systemctl daemon-reload 2>/dev/null || true
+                            systemctl enable "$sName" 2>&1 || true
+                        fi
+                        echo "Configured $sName autostart for user '${'$'}TARGET_USER'."
+                    """.trimIndent()
+                }
+                "niri.service" -> {
+                    """
+                        TARGET_USER="${configuredUser}"
+                        if [ -z "${'$'}TARGET_USER" ]; then
+                            TARGET_USER=${'$'}(awk -F: '${'$'}3 >= 1000 && ${'$'}3 < 65534 {print ${'$'}1; exit}' /etc/passwd 2>/dev/null || echo "1000")
+                        fi
+                        [ -z "${'$'}TARGET_USER" ] && TARGET_USER="1000"
+
+                        mkdir -p /etc/systemd/system 2>/dev/null || true
+                        cat > "/etc/systemd/system/niri.service" <<EOF
+[Unit]
+Description=Niri Compositor (Anland Backend)
+Documentation=https://github.com/niri-wm/niri
+After=network.target display-manager.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=${'$'}TARGET_USER
+PAMName=login
+EnvironmentFile=-/etc/environment
+Environment=ANLAND_SOCKET=/run/display.sock
+Environment=ANLAND_DRM_DEVICE=/dev/dri/renderD128
+Environment=XWAYLAND_GBM_DEVICE=/dev/dri/renderD128
+Environment=MESA_LOADER_DRIVER_OVERRIDE=kgsl
+Environment=GALLIUM_DRIVER=kgsl
+Environment=FD_FORCE_KGSL=1
+Environment=XDG_SESSION_TYPE=wayland
+Environment=XDG_CURRENT_DESKTOP=niri
+Environment=QT_QPA_PLATFORM=wayland
+Environment=GTK_THEME=Adwaita:dark
+
+ExecStartPre=/bin/bash -lc 'for i in ${'$'}(seq 1 60); do [ -S /run/display.sock ] && exit 0; sleep 1; done; exit 1'
+ExecStart=/bin/bash -lc 'export XDG_RUNTIME_DIR=/tmp/runtime-${'$'}(id -un); mkdir -p -m 0700 "${'$'}XDG_RUNTIME_DIR"; rm -f "${'$'}XDG_RUNTIME_DIR"/wayland-* "${'$'}XDG_RUNTIME_DIR"/niri.* 2>/dev/null || true; if command -v niri >/dev/null 2>&1; then niri --anland; else /usr/local/bin/niri --anland; fi'
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                        chmod 644 "/etc/systemd/system/niri.service"
+
+                        cat > "/etc/systemd/system/noctalia.service" <<EOF
+[Unit]
+Description=Noctalia Shell (Wayland)
+Documentation=https://github.com/noctalia-dev/noctalia
+After=niri.service
+Wants=niri.service
+
+[Service]
+Type=simple
+User=${'$'}TARGET_USER
+PAMName=login
+Environment=QT_QPA_PLATFORM=wayland
+Environment=GTK_THEME=Adwaita:dark
+ExecStart=/usr/local/bin/noctalia-launch
+Restart=on-failure
+RestartSec=2
+StartLimitIntervalSec=60
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                        chmod 644 "/etc/systemd/system/noctalia.service"
+
+                        if command -v systemctl >/dev/null 2>&1; then
+                            systemctl daemon-reload 2>/dev/null || true
+                            systemctl enable niri.service 2>&1 || true
+                            systemctl enable noctalia.service 2>&1 || true
+                        fi
+                        echo "Configured niri and noctalia autostart for user '${'$'}TARGET_USER'."
+                    """.trimIndent()
+                }
+                else -> {
+                    val sCmd = selectedDesktopStartCommand ?: "export XDG_RUNTIME_DIR=/tmp/runtime-\$(id -un); startplasma-wayland"
+                    """
+                        TARGET_USER="${configuredUser}"
+                        if [ -z "${'$'}TARGET_USER" ]; then
+                            TARGET_USER=${'$'}(awk -F: '${'$'}3 >= 1000 && ${'$'}3 < 65534 {print ${'$'}1; exit}' /etc/passwd 2>/dev/null || echo "1000")
+                        fi
+                        [ -z "${'$'}TARGET_USER" ] && TARGET_USER="1000"
+
+                        mkdir -p /etc/systemd/system 2>/dev/null || true
+                        cat > "/etc/systemd/system/$sName" <<EOF
+[Unit]
+Description=Start $sName Desktop Environment
+After=network.target display-manager.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=${'$'}TARGET_USER
+PAMName=login
+EnvironmentFile=-/etc/environment
+ExecStart=/bin/bash -lc '$sCmd'
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                        chmod 644 "/etc/systemd/system/$sName"
+                        if command -v systemctl >/dev/null 2>&1; then
+                            systemctl daemon-reload 2>/dev/null || true
+                            systemctl enable "$sName" 2>&1 || true
+                        fi
+                        echo "Configured $sName autostart for user '${'$'}TARGET_USER'."
+                    """.trimIndent()
+                }
+            }
+            val b64Svc = android.util.Base64.encodeToString(svcScript.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val svcCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} run 'echo $b64Svc | base64 -d | sh'"
+            ContainerOperationExecutor.executeCommand(svcCmd, "configure_anland_service", logger, skipHeader = true)
+
+            if (success) {
+                logger.i("Anland Wayland environment and autostart service configured ✓")
+                onSuccess("Anland auto-configured successfully")
+            } else {
+                logger.e("Failed to configure Anland environment")
+                onError("Failed to configure Anland environment")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error configuring Anland environment: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
         }
     }
 }

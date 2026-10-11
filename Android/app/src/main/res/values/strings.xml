@@ -380,6 +380,10 @@
     <string name="environment_variables_configured">%1$d variable(s) configured</string>
     <string name="not_configured">Not configured</string>
     <string name="env_placeholder">KEY=VALUE, one per line. Lines starting with # are ignored.</string>
+    <string name="env_hint_row">Each row is one KEY=VALUE pair</string>
+    <string name="key_label">KEY</string>
+    <string name="value_label">VALUE</string>
+    <string name="add_variable">Add variable</string>
 
     <!-- Custom Init -->
     <string name="custom_init_label">Custom Init Binary</string>
@@ -477,6 +481,16 @@
     <string name="mask_service">Mask service</string>
     <string name="inspect_unit">Inspect unit</string>
     <string name="edit_override">Edit override</string>
+    <string name="download_log">Download log</string>
+    <string name="log_status_live">Live</string>
+    <string name="log_status_paused">Paused</string>
+    <string name="log_pause_live">Pause live tail</string>
+    <string name="log_resume_live">Resume live tail</string>
+    <string name="log_jump_to_bottom">Jump to bottom</string>
+    <string name="log_empty">No log entries yet</string>
+    <string name="log_load_error_title">Couldn\'t load logs</string>
+    <string name="log_download_failed">Couldn\'t save the log file</string>
+    <string name="log_download_saved">Log saved</string>
     <string name="property_description">Description</string>
     <string name="property_load_state">Load State</string>
     <string name="property_active_state">Active State</string>
@@ -773,4 +787,111 @@
     <string name="upstream_max">Up to %1$d interfaces. Untick one to add another.</string>
     <string name="bind_path_separator">Paths cannot contain , or :</string>
     <string name="keep_editing">Keep editing</string>
+
+    <!-- Anland -->
+    <string name="anland_option">Anland</string>
+    <string name="enable_anland">Anland Display</string>
+    <string name="enable_anland_description">Run the anland display daemon so you can open a desktop window</string>
+    <string name="launch_anland_window">Launch Anland</string>
+    <string name="anland_not_installed">Anland consumer app is not installed</string>
+    <string name="install_anland_kde">Install Anland Desktop</string>
+    <string name="install_anland_kde_desc">Fetch and run the one-click installer for patched Wayland/KWin packages</string>
+    <string name="setup_anland_env">Configure Anland Environment</string>
+    <string name="setup_anland_env_desc">Write Wayland, display, and socket settings to /etc/environment</string>
+    <string name="setup_anland_env_success">Anland environment configured successfully</string>
+    <string name="setup_anland_snapdragon_hint">Add Snapdragon 8 Gen 2 display fix</string>
+    <string name="anland_setup_title">Anland Wayland Setup</string>
+    <string name="start_plasma_wayland">Start Plasma Wayland</string>
+
+    <!-- Wireless Display & Stream -->
+    <string name="wireless_display">Wireless Display</string>
+    <string name="wireless_display_description">Mirror the existing Termux:X11/XFCE session over the LAN, via VNC or low-latency H.264 streaming</string>
+    <string name="wireless_display_requires_x11">Requires Termux:X11 or Anland to be enabled above</string>
+    <string name="wireless_display_password_hint">You\'ll set a VNC password from this container\'s details screen once it\'s created -- the service won\'t start without one.</string>
+    <string name="wireless_display_card_title">Wireless Display</string>
+    <string name="vnc_status_not_installed">x11vnc is not installed yet</string>
+    <string name="vnc_status_no_password">Set a password to start the VNC service</string>
+    <string name="vnc_status_stopped">Stopped -- waiting for the X11 session</string>
+    <string name="vnc_status_running">Running on display %1$s</string>
+    <string name="vnc_password_label">VNC Password</string>
+    <string name="vnc_password_placeholder">At least 6 characters</string>
+    <string name="vnc_set_password_and_enable">Set Password &amp; Enable</string>
+    <string name="vnc_change_password">Change Password</string>
+    <string name="vnc_connection_address">Connection Address</string>
+    <string name="vnc_address_copied">VNC address copied</string>
+    <string name="vnc_restart_service">Restart</string>
+    <string name="vnc_disable">Disable</string>
+    <string name="vnc_password_set_success">VNC password set and service started</string>
+    <string name="vnc_password_too_short">Password must be at least 6 characters</string>
+    <string name="vnc_no_address_yet">No address yet -- start the container first</string>
+    <string name="vnc_disabled_success">Wireless display disabled</string>
+    <string name="vnc_restarted_success">Wireless display service restarted</string>
+
+    <!-- Wireless Stream Card -->
+    <string name="stream_card_title">Wireless Stream</string>
+    <string name="stream_status_not_installed">Streaming dependencies not installed yet</string>
+    <string name="stream_status_stopped">Stopped -- waiting for the X11 session</string>
+    <string name="stream_status_running">Running on display %1$s (%2$s)</string>
+    <string name="stream_engine_ffmpeg_hw">hardware H.264</string>
+    <string name="stream_engine_gstreamer_sw">software H.264, XDamage capture</string>
+    <string name="stream_engine_ffmpeg_sw">software H.264</string>
+    <string name="stream_detect_caps">Detect Capabilities</string>
+    <string name="stream_caps_hw_available">Hardware encoder detected: %1$s</string>
+    <string name="stream_caps_hw_unavailable">No hardware encoder reachable -- using software encoding</string>
+    <string name="stream_caps_gstreamer_available">GStreamer available (XDamage-based capture)</string>
+    <string name="stream_enable_button">Enable Streaming</string>
+    <string name="stream_connection_address">Connection Address</string>
+    <string name="stream_connect_hint">Open in VLC or: ffplay tcp://%1$s</string>
+    <string name="stream_address_copied">Stream address copied</string>
+    <string name="stream_live_stats">%1$s fps, %2$s kbps</string>
+    <string name="stream_restart">Restart</string>
+    <string name="stream_disable">Disable</string>
+    <string name="stream_enabled_success">Streaming enabled</string>
+    <string name="stream_disabled_success">Streaming disabled</string>
+    <string name="stream_restarted_success">Stream service restarted</string>
+    <string name="stream_no_address_yet">No address yet -- start the container first</string>
+    <string name="switch_to_vnc">Switch to VNC Display</string>
+    <string name="switch_to_stream">Switch to H.264 Stream</string>
+    <string name="switch_to_vnc_desc">Use standard VNC (x11vnc) for broad client compatibility (AVNC, RealVNC, TigerVNC)</string>
+    <string name="switch_to_stream_desc">Use hardware/software H.264 video streaming for ultra-low latency mirroring in browsers and VLC</string>
+
+    <!-- scrcpy -->
+    <string name="cat_scrcpy">scrcpy (Phone Screen)</string>
+    <string name="enable_scrcpy_description">Mirror this Android device\'s own screen into this container\'s desktop, over adb loopback</string>
+    <string name="scrcpy_hint">Never leaves the device -- no network exposure, no LAN-only toggle needed. Install and launch from this container\'s details screen once it\'s created.</string>
+    <string name="scrcpy_max_size_label">Max Size (px)</string>
+    <string name="scrcpy_max_size_placeholder">No cap</string>
+    <string name="scrcpy_bitrate_label">Bitrate (kbps)</string>
+    <string name="scrcpy_card_title">scrcpy</string>
+    <string name="scrcpy_status_not_installed">Not installed</string>
+    <string name="scrcpy_status_no_display">Installed -- waiting for a desktop session (X11 or anland)</string>
+    <string name="scrcpy_status_stopped">Ready</string>
+    <string name="scrcpy_status_running">Mirroring active</string>
+    <string name="scrcpy_display_mode_label">Display: %1$s</string>
+    <string name="scrcpy_display_mode_x11">X11 (Termux:X11)</string>
+    <string name="scrcpy_display_mode_anland">anland (Wayland/KWin)</string>
+    <string name="scrcpy_display_mode_none">None detected</string>
+    <string name="scrcpy_install_button">Install scrcpy</string>
+    <string name="scrcpy_launch_button">Launch</string>
+    <string name="scrcpy_stop_button">Stop</string>
+    <string name="scrcpy_no_display_hint">Start the container\'s desktop session first (X11 via Termux:X11, or anland) -- scrcpy needs a window to open in.</string>
+    <string name="scrcpy_installed_success">scrcpy installed</string>
+    <string name="scrcpy_launched_success">scrcpy launched -- check the container\'s desktop for the window</string>
+    <string name="scrcpy_stopped_success">scrcpy stopped</string>
+    <string name="scrcpy_presets_title">Quick Presets</string>
+    <string name="scrcpy_stream_settings_title">Stream &amp; Display Settings</string>
+    <string name="scrcpy_script_runner_title">Terminal &amp; Script Runner</string>
+    <string name="scrcpy_audio_forwarding">Audio Forwarding</string>
+    <string name="scrcpy_audio_forwarding_desc">Forward Android device audio into the container</string>
+    <string name="scrcpy_turn_screen_off">Turn Screen Off</string>
+    <string name="scrcpy_turn_screen_off_desc">Mirror while keeping physical Android device display off</string>
+    <string name="scrcpy_stay_awake">Stay Awake</string>
+    <string name="scrcpy_stay_awake_desc">Prevent the physical Android device from sleeping during session</string>
+    <string name="scrcpy_max_fps_label">Max Frame Rate (FPS)</string>
+    <string name="scrcpy_custom_args_label">Custom scrcpy Arguments</string>
+    <string name="scrcpy_custom_args_placeholder">e.g. --show-touches --stay-awake</string>
+    <string name="scrcpy_run_in_terminal">Run in Terminal</string>
+    <string name="scrcpy_run_in_background">Run in Background</string>
+    <string name="scrcpy_save_settings">Save Settings</string>
+    <string name="scrcpy_settings_saved">scrcpy settings saved</string>
 </resources>

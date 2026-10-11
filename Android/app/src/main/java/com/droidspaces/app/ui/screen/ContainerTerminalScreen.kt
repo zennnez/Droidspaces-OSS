@@ -23,6 +23,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardHide
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -64,6 +68,7 @@ private data class TerminalTab(
     val id: String,
     val user: String,
     val label: String,
+    val initialCommand: String? = null,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,6 +76,7 @@ private data class TerminalTab(
 fun ContainerTerminalScreen(
     containerName: String,
     initialUsers: List<String>,
+    initialCommand: String? = null,
     onNavigateBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -126,13 +132,56 @@ fun ContainerTerminalScreen(
         hostnameReady = true
     }
 
+    fun addTab(user: String, command: String? = null) {
+        TerminalSessionService.start(context)
+        val id = "${containerName}_${UUID.randomUUID().toString().take(8)}"
+        val newTab = TerminalTab(id = id, user = user, label = "$user@$hostname", initialCommand = command)
+        val currentIndex = tabs.indexOfFirst { it.id == activeTabId }
+        if (currentIndex != -1) {
+            tabs.add(currentIndex + 1, newTab)
+        } else {
+            tabs.add(newTab)
+        }
+        activeTabId = id
+    }
+
+    fun closeTab(tab: TerminalTab) {
+        // terminateSession handles the immediate UI state update (globalSessionList.remove)
+        // and internal cleanup delays (EOF propagation).
+        binder?.terminateSession(tab.id)
+
+        if (tabs.size == 1) keyboardController?.hide()
+        val idx = tabs.indexOf(tab)
+        tabs.remove(tab)
+        if (tabs.isEmpty()) onNavigateBack()
+        else activeTabId = tabs.getOrElse(idx.coerceAtMost(tabs.lastIndex)) { tabs.last() }.id
+    }
+
+    var showActionsMenu by remember { mutableStateOf(false) }
+
     LaunchedEffect(binder, hostnameReady) {
         binder ?: return@LaunchedEffect
         if (!hostnameReady) return@LaunchedEffect
         if (tabs.isNotEmpty()) return@LaunchedEffect
         val existing = TerminalSessionService.globalSessionList
             .filter { (_, info) -> info.containerName == containerName }
-        if (existing.isNotEmpty()) {
+        if (!initialCommand.isNullOrBlank()) {
+            val isDesktopCommand = initialCommand.contains("startplasma") ||
+                initialCommand.contains("niri") ||
+                initialCommand.contains("noctalia") ||
+                initialCommand.contains("sway") ||
+                initialCommand.contains("labwc") ||
+                initialCommand.contains("wayfire") ||
+                initialCommand.contains("gnome-session") ||
+                initialCommand.contains("xfce4-session")
+            val userToUse = if (isDesktopCommand) {
+                availableUsers.firstOrNull { it != "root" } ?: "root"
+            } else "root"
+            val cmdToUse = if (userToUse == "root" && initialCommand.contains("startplasma-wayland") && !initialCommand.contains("KWIN_WAYLAND_ALLOW_ROOT")) {
+                "KWIN_WAYLAND_ALLOW_ROOT=1 $initialCommand"
+            } else initialCommand
+            addTab(userToUse, cmdToUse)
+        } else if (existing.isNotEmpty()) {
             existing.forEach { (id, info) ->
                 tabs.add(TerminalTab(id = id, user = info.user, label = "${info.user}@$hostname"))
             }
@@ -156,31 +205,6 @@ fun ContainerTerminalScreen(
                 activeTabId = tabs.last().id
             }
         }
-    }
-
-    fun addTab(user: String) {
-        TerminalSessionService.start(context)
-        val id = "${containerName}_${UUID.randomUUID().toString().take(8)}"
-        val newTab = TerminalTab(id = id, user = user, label = "$user@$hostname")
-        val currentIndex = tabs.indexOfFirst { it.id == activeTabId }
-        if (currentIndex != -1) {
-            tabs.add(currentIndex + 1, newTab)
-        } else {
-            tabs.add(newTab)
-        }
-        activeTabId = id
-    }
-
-    fun closeTab(tab: TerminalTab) {
-        // terminateSession handles the immediate UI state update (globalSessionList.remove)
-        // and internal cleanup delays (EOF propagation).
-        binder?.terminateSession(tab.id)
-
-        if (tabs.size == 1) keyboardController?.hide()
-        val idx = tabs.indexOf(tab)
-        tabs.remove(tab)
-        if (tabs.isEmpty()) onNavigateBack()
-        else activeTabId = tabs.getOrElse(idx.coerceAtMost(tabs.lastIndex)) { tabs.last() }.id
     }
 
     val exitScreen = {
@@ -255,6 +279,56 @@ fun ContainerTerminalScreen(
                         IconButton(onClick = { showUserPicker = true }) {
                             Icon(Icons.Default.Add, contentDescription = "New tab")
                         }
+                        Box {
+                            IconButton(onClick = { showActionsMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More actions")
+                            }
+                            DropdownMenu(
+                                expanded = showActionsMenu,
+                                onDismissRequest = { showActionsMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Auto-Configure Adreno Turnip") },
+                                    leadingIcon = { Icon(Icons.Default.Speed, contentDescription = null) },
+                                    onClick = {
+                                        showActionsMenu = false
+                                        binder?.getSession(activeTabId)?.write(
+                                            "echo 'Configuring Adreno Turnip...' && (sudo usermod -aG droidspaces-gpu \$(whoami) 2>/dev/null || true) && export MESA_LOADER_DRIVER_OVERRIDE=kgsl TU_DEBUG=noconform && echo 'Adreno Turnip environment active!'\n"
+                                        )
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Auto-Install Turnip GPU Drivers") },
+                                    leadingIcon = { Icon(Icons.Default.Speed, contentDescription = null) },
+                                    onClick = {
+                                        showActionsMenu = false
+                                        binder?.getSession(activeTabId)?.write(
+                                            "curl -fLO https://raw.githubusercontent.com/Goldzxcbug/Droidspaces-dev/main/Android/app/src/main/assets/install_turnip.sh && chmod +x install_turnip.sh && ./install_turnip.sh\n"
+                                        )
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Install Zsh & Fish Shells") },
+                                    leadingIcon = { Icon(Icons.Default.Terminal, contentDescription = null) },
+                                    onClick = {
+                                        showActionsMenu = false
+                                        binder?.getSession(activeTabId)?.write(
+                                            "(command -v apt-get >/dev/null && sudo apt-get update && sudo apt-get install -y zsh fish) || (command -v pacman >/dev/null && sudo pacman -Sy --noconfirm zsh fish) || (command -v apk >/dev/null && sudo apk add zsh fish) || (command -v dnf >/dev/null && sudo dnf install -y zsh fish) || echo 'Package manager not recognized'\n"
+                                        )
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Source /run/droidspaces.env") },
+                                    leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                                    onClick = {
+                                        showActionsMenu = false
+                                        binder?.getSession(activeTabId)?.write(
+                                            "[ -f /run/droidspaces.env ] && source /run/droidspaces.env && echo 'Environment sourced successfully'\n"
+                                        )
+                                    }
+                                )
+                            }
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -262,7 +336,7 @@ fun ContainerTerminalScreen(
                 )
 
                 if (tabs.isNotEmpty()) {
-                    SecondaryScrollableTabRow(
+                    ScrollableTabRow(
                         selectedTabIndex = tabs.indexOfFirst { it.id == activeTabId }.coerceAtLeast(0),
                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                         contentColor = MaterialTheme.colorScheme.primary,
@@ -432,6 +506,7 @@ private fun TerminalTabView(
                                         }
                                     },
                                 )
+                                val isNew = binder.getSession(tab.id) == null
                                 val session: TerminalSession =
                                     binder.getSession(tab.id) ?: binder.createSession(
                                         containerName = containerName,
@@ -443,6 +518,11 @@ private fun TerminalTabView(
                                 attachSession(session)
                                 setTerminalViewClient(client)
                                 backEnd = client
+                                if (isNew && !tab.initialCommand.isNullOrBlank()) {
+                                    postDelayed({
+                                        session.write("${tab.initialCommand}\n")
+                                    }, 300)
+                                }
                             }
 
                             post {

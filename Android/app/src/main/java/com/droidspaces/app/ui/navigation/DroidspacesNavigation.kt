@@ -44,6 +44,11 @@ import com.droidspaces.app.ui.screen.OpenRCScreen
 import com.droidspaces.app.ui.screen.ContainerTerminalScreen
 import com.droidspaces.app.ui.screen.SnapshotsScreen
 import com.droidspaces.app.ui.screen.DiskUsageScreen
+import com.droidspaces.app.ui.screen.AnlandScreen
+import com.droidspaces.app.ui.screen.AnlandGuideScreen
+import com.droidspaces.app.ui.screen.AdrenoTurnipScreen
+import com.droidspaces.app.ui.screen.WirelessScreen
+import com.droidspaces.app.ui.screen.ScrcpyScreen
 import com.droidspaces.app.ui.viewmodel.ContainerInstallationViewModel
 import com.droidspaces.app.ui.viewmodel.ContainerViewModel
 import com.droidspaces.app.util.ContainerManager
@@ -124,14 +129,29 @@ sealed class Screen(val route: String) {
         fun createRoute(containerName: String) = "openrc/${Uri.encode(containerName)}"
     }
 
-    data object Terminal : Screen("terminal/{containerName}") {
-        fun createRoute(containerName: String) = "terminal/${Uri.encode(containerName)}"
+    data object Terminal : Screen("terminal/{containerName}?initialCommand={initialCommand}") {
+        fun createRoute(containerName: String, initialCommand: String? = null) =
+            if (initialCommand != null) "terminal/${Uri.encode(containerName)}?initialCommand=${Uri.encode(initialCommand)}"
+            else "terminal/${Uri.encode(containerName)}"
     }
     data object DiskUsage : Screen("disk_usage/{containerName}") {
         fun createRoute(containerName: String) = "disk_usage/${Uri.encode(containerName)}"
     }
     data object SnapshotsManage : Screen("snapshots_manage/{containerName}") {
         fun createRoute(containerName: String) = "snapshots_manage/${Uri.encode(containerName)}"
+    }
+    data object AnlandGuide : Screen("anland_guide")
+    data object WirelessManage : Screen("wireless_manage/{containerName}") {
+        fun createRoute(containerName: String) = "wireless_manage/${Uri.encode(containerName)}"
+    }
+    data object ScrcpyManage : Screen("scrcpy_manage/{containerName}") {
+        fun createRoute(containerName: String) = "scrcpy_manage/${Uri.encode(containerName)}"
+    }
+    data object AnlandManage : Screen("anland_manage/{containerName}") {
+        fun createRoute(containerName: String) = "anland_manage/${Uri.encode(containerName)}"
+    }
+    data object TurnipManage : Screen("turnip_manage/{containerName}") {
+        fun createRoute(containerName: String) = "turnip_manage/${Uri.encode(containerName)}"
     }
 }
 
@@ -605,6 +625,9 @@ fun DroidspacesNavigation(
                 },
                 onNavigateToTerminalAppearance = {
                     navController.navigate(Screen.TerminalAppearance.route)
+                },
+                onNavigateToAnlandGuide = {
+                    navController.navigate(Screen.AnlandGuide.route)
                 }
             )
         }
@@ -685,6 +708,30 @@ fun DroidspacesNavigation(
                     },
                     onNavigateToTerminal = {
                         navController.navigate(Screen.Terminal.createRoute(containerName))
+                    },
+                    onNavigateToDiskUsage = {
+                        navController.navigate(Screen.DiskUsage.createRoute(containerName))
+                    },
+                    onNavigateToSnapshots = {
+                        navController.navigate(Screen.SnapshotsManage.createRoute(containerName))
+                    },
+                    onNavigateToWireless = {
+                        navController.navigate(Screen.WirelessManage.createRoute(containerName))
+                    },
+                    onNavigateToScrcpy = {
+                        navController.navigate(Screen.ScrcpyManage.createRoute(containerName))
+                    },
+                    onNavigateToAnland = {
+                        navController.navigate(Screen.AnlandManage.createRoute(containerName))
+                    },
+                    onNavigateToTurnip = {
+                        navController.navigate(Screen.TurnipManage.createRoute(containerName))
+                    },
+                    onNavigateToAnlandGuide = {
+                        navController.navigate(Screen.AnlandGuide.route)
+                    },
+                    onNavigateToTerminalWithCommand = { cmd: String ->
+                        navController.navigate(Screen.Terminal.createRoute(containerName, cmd))
                     }
                 )
             } ?: LaunchedEffect(Unit) {
@@ -799,7 +846,12 @@ fun DroidspacesNavigation(
         composable(
             route = Screen.Terminal.route,
             arguments = listOf(
-                navArgument("containerName") { type = NavType.StringType }
+                navArgument("containerName") { type = NavType.StringType },
+                navArgument("initialCommand") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
             ),
             enterTransition = defaultEnterTransition,
             exitTransition = defaultExitTransition,
@@ -807,6 +859,7 @@ fun DroidspacesNavigation(
             popExitTransition = defaultExitTransition
         ) { backStackEntry ->
             val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            val initialCommand = backStackEntry.arguments?.getString("initialCommand")
             // Resolve cached users for the user picker dialog
             val users = remember(containerName) {
                 com.droidspaces.app.util.ContainerUsersManager.getCachedUsers(containerName)
@@ -815,6 +868,7 @@ fun DroidspacesNavigation(
             ContainerTerminalScreen(
                 containerName = containerName,
                 initialUsers = users,
+                initialCommand = initialCommand,
                 onNavigateBack = {
                     navController.popBackStack()
                     sharedContainerViewModel.refresh()
@@ -847,6 +901,89 @@ fun DroidspacesNavigation(
         ) { backStackEntry ->
             val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
             DiskUsageScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.AnlandGuide.route,
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) {
+            AnlandGuideScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.WirelessManage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            WirelessScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.ScrcpyManage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            ScrcpyScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToTerminalWithCommand = { cmd ->
+                    navController.navigate(Screen.Terminal.createRoute(containerName, cmd))
+                }
+            )
+        }
+
+        composable(
+            route = Screen.AnlandManage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            AnlandScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToGuide = { navController.navigate(Screen.AnlandGuide.route) },
+                onStartDesktopTerminal = { cmd ->
+                    navController.navigate(Screen.Terminal.createRoute(containerName, cmd))
+                }
+            )
+        }
+
+        composable(
+            route = Screen.TurnipManage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            AdrenoTurnipScreen(
                 containerName = containerName,
                 onNavigateBack = { navController.popBackStack() }
             )
