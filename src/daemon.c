@@ -39,8 +39,8 @@
 
 #define DS_SOCK_NAME "droidspaces"
 #define DS_BACKLOG SOMAXCONN
-#define DS_MAX_ARGC 64
-#define DS_MAX_ARG 8192
+#define DS_MAX_ARGC 256
+#define DS_MAX_ARG (256 * 1024)
 #define DS_IOBUF 8192
 /* Client input queued toward the child: the pty master in PTY mode, the
  * command's stdin pipe in pipe mode. */
@@ -794,12 +794,31 @@ static void handle_conn(int conn) {
   /* log the request */
   {
     char cmdline[512];
+    cmdline[0] = '\0';
     size_t off = 0;
-    for (int i = 0; i < req.argc && off < sizeof(cmdline) - 1; i++) {
-      int n = snprintf(cmdline + off, sizeof(cmdline) - off, "%s%s",
-                       i > 0 ? " " : "", req.argv[i]);
-      if (n > 0)
-        off += (size_t)n;
+    for (int i = 0; i < req.argc && off + 1 < sizeof(cmdline); i++) {
+      size_t sep_len = (i > 0) ? 1 : 0;
+      size_t arg_len = strlen(req.argv[i]);
+      if (off + sep_len + arg_len < sizeof(cmdline)) {
+        if (sep_len) {
+          cmdline[off++] = ' ';
+        }
+        memcpy(cmdline + off, req.argv[i], arg_len);
+        off += arg_len;
+        cmdline[off] = '\0';
+      } else {
+        /* Truncate gracefully */
+        if (sep_len && off + 1 < sizeof(cmdline)) {
+          cmdline[off++] = ' ';
+        }
+        size_t rem = sizeof(cmdline) - 1 - off;
+        if (rem > 0) {
+          memcpy(cmdline + off, req.argv[i], rem);
+          off += rem;
+          cmdline[off] = '\0';
+        }
+        break;
+      }
     }
     ds_log("Client connected. Mode: %s",
            (req.flags & REQ_FLAG_PTY) ? "PTY" : "PIPE");
@@ -853,6 +872,9 @@ static void daemonize(int foreground) {
   umask(0);
   if (chdir("/") < 0) { /* ignore */
   }
+
+  /* Set 50ms timer slack for daemon: coalesces timer wakeups on host */
+  prctl(PR_SET_TIMERSLACK, 50000000UL, 0, 0, 0);
 
   /* Scrub dynamic-linker and field-splitting env vars before serving requests
    * and re-exec'ing droidspaces as root, so a value inherited from the launcher
