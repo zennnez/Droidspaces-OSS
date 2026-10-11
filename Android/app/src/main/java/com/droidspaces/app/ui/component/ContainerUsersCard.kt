@@ -17,7 +17,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
@@ -29,7 +28,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.droidspaces.app.ui.component.DsDropdown
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -48,7 +46,6 @@ import com.droidspaces.app.ui.util.LoadingSize
 import com.droidspaces.app.ui.util.showError
 import com.droidspaces.app.ui.util.showSuccess
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.droidspaces.app.R
@@ -77,7 +74,6 @@ fun ContainerUsersCard(
     var isLoading by remember {
         mutableStateOf(ContainerUsersManager.getCachedUsers(containerName) == null)
     }
-    var isManuallyRefreshing by remember { mutableStateOf(false) }
     var showAddUserDialog by remember { mutableStateOf(false) }
 
     // Available users list: always include "root", plus any local users
@@ -115,27 +111,10 @@ fun ContainerUsersCard(
             }
             users = ContainerUsersManager.getUsers(containerName, useCache = refreshTrigger == 0)
             isLoading = false
-            isManuallyRefreshing = false
         }
     }
 
-    // Manual refresh function with rotation animation
-    fun refreshUsers() {
-        if (!isManuallyRefreshing) {
-            isManuallyRefreshing = true
-            scope.launch {
-                val startTime = System.currentTimeMillis()
-                users = ContainerUsersManager.getUsers(containerName, useCache = false)
-                val elapsed = System.currentTimeMillis() - startTime
-                val minRotationTime = 600L
-                if (elapsed < minRotationTime) {
-                    delay(minRotationTime - elapsed)
-                }
-                isManuallyRefreshing = false
-                onRefreshUsers()
-            }
-        }
-    }
+
 
     Surface(
         modifier = modifier
@@ -182,22 +161,6 @@ fun ContainerUsersCard(
                 }
 
                 // Action icons: + Add User and Refresh
-                val rotation by animateFloatAsState(
-                    targetValue = if (isManuallyRefreshing) 360f else 0f,
-                    animationSpec = if (isManuallyRefreshing) {
-                        tween(
-                            durationMillis = 600,
-                            easing = LinearEasing
-                        )
-                    } else {
-                        tween(
-                            durationMillis = 0,
-                            easing = LinearEasing
-                        )
-                    },
-                    label = "refresh_rotation"
-                )
-
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
                         onClick = {
@@ -216,25 +179,17 @@ fun ContainerUsersCard(
 
                     Spacer(Modifier.width(4.dp))
 
-                    IconButton(
-                        onClick = {
+                    DsRefreshButton(
+                        contentDescription = context.getString(R.string.refresh_users),
+                        onRefresh = {
                             clearFocus()
-                            refreshUsers()
+                            users = ContainerUsersManager.getUsers(containerName, useCache = false)
+                            onRefreshUsers()
                         },
-                        enabled = !isManuallyRefreshing,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = context.getString(R.string.refresh_users),
-                            modifier = Modifier
-                                .size(20.dp)
-                                .graphicsLayer {
-                                    rotationZ = rotation
-                                },
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                        modifier = Modifier.size(36.dp),
+                        iconSize = 20.dp,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 

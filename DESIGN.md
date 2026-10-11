@@ -379,6 +379,12 @@ Hero state changes use `MaterialTheme.motionScheme`, which the theme sets to
 for fades, `slowEffectsSpec()` for a result line fading in. Never hand-type a spring, and never
 `DampingRatioMediumBouncy` on a result.
 
+A refresh button that reloads a list in place, in a card header or a sheet title, is
+`DsRefreshButton`. It spins a full turn on every tap and keeps turning while the reload runs,
+stopping only at the top of a turn. Most reloads finish in milliseconds, and without the spin the
+tap looks ignored. A top bar refresh that swaps the screen to its own loading state does not need
+it, the loading state is the feedback.
+
 ### The setup flow
 
 Welcome, the feature pager, the root check and the backend installer share one geometry, and

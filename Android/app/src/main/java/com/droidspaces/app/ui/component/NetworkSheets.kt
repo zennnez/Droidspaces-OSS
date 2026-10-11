@@ -14,11 +14,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -34,7 +30,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,7 +47,6 @@ import com.droidspaces.app.ui.util.FocusUtils
 import com.droidspaces.app.util.ContainerManager
 import com.droidspaces.app.util.PortForward
 import com.droidspaces.app.util.ValidationUtils
-import kotlinx.coroutines.launch
 
 /**
  * Pick upstream interfaces in the order they should be tried: each tap numbers
@@ -81,7 +75,7 @@ fun UpstreamPickerSheet(
     DsBottomSheet(
         onDismiss = onDismiss,
         title = context.getString(R.string.add_upstream_interface),
-        titleAction = { RefreshButton { live = ContainerManager.listUpstreamInterfaces() } },
+        titleAction = { DsRefreshButton(context.getString(R.string.refresh), { live = ContainerManager.listUpstreamInterfaces() }) },
         footer = {
             DialogFooterRow(
                 dismissLabel = context.getString(R.string.cancel),
@@ -133,7 +127,7 @@ fun HostInterfaceSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
     DsBottomSheet(
         onDismiss = onDismiss,
         title = context.getString(R.string.macvlan_parent),
-        titleAction = { RefreshButton { available = ContainerManager.listEthernetInterfaces() } },
+        titleAction = { DsRefreshButton(context.getString(R.string.refresh), { available = ContainerManager.listEthernetInterfaces() }) },
         footer = {
             DialogFooterRow(
                 dismissLabel = context.getString(R.string.cancel),
@@ -237,17 +231,6 @@ fun AddPortForwardSheet(existing: List<PortForward>, onDismiss: () -> Unit, onAd
             }
         }
     }
-}
-
-@Composable
-private fun RefreshButton(onRefresh: suspend () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var busy by remember { mutableStateOf(false) }
-    IconButton(
-        onClick = { busy = true; scope.launch { onRefresh(); busy = false } },
-        enabled = !busy
-    ) { Icon(Icons.Default.Refresh, contentDescription = context.getString(R.string.refresh)) }
 }
 
 /** The interfaces on the phone now, as one rounded list; a line of text when there are none. */
