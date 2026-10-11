@@ -59,8 +59,9 @@ run_in_chroot() {
     local common_exports="export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/libexec:/opt/bin'; export TMPDIR='/tmp';"
 
     # We use busybox chroot to run commands inside the rootfs
-    # Note: This assumes /bin/sh exists in the rootfs
-    $CHROOT "$ROOTFS_PATH" /bin/sh -c "$common_exports $command"
+    if $TEST -x "$ROOTFS_PATH/bin/sh" || $TEST -x "$ROOTFS_PATH/usr/bin/sh"; then
+        $CHROOT "$ROOTFS_PATH" /bin/sh -c "$common_exports $command" 2>/dev/null || true
+    fi
 }
 
 # OpenRC runlevel wiring without rc-update: rc-update needs /run/openrc, which
@@ -85,25 +86,27 @@ if $TEST -d "$ROOTFS_PATH/nix"; then
     exit 0
 fi
 
-# Pre-commit machine-id to prevent first-boot deadlock in Fedora 44
-log "Generating machine-id..."
-$CAT /proc/sys/kernel/random/uuid | $BB tr -d '-' | $BB tr -d '\n' > "$ROOTFS_PATH/etc/machine-id"
-$ECHO "" >> "$ROOTFS_PATH/etc/machine-id"
-$CHMOD 444 "$ROOTFS_PATH/etc/machine-id"
-
-# Check if fixes were already applied
-if $TEST -f "$ROOTFS_PATH/etc/droidspaces"; then
-    log "Post-extraction fixes already applied, skipping..."
-    exit 0
+# Pre-commit machine-id to prevent first-boot deadlock in Fedora 44 (if not already set)
+if [ ! -s "$ROOTFS_PATH/etc/machine-id" ]; then
+    log "Generating machine-id..."
+    $MKDIR -p "$ROOTFS_PATH/etc" 2>/dev/null || true
+    $CHMOD 644 "$ROOTFS_PATH/etc/machine-id" 2>/dev/null || true
+    if [ -f /proc/sys/kernel/random/uuid ]; then
+        $CAT /proc/sys/kernel/random/uuid | $BB tr -d '-' | $BB tr -d '\n' > "$ROOTFS_PATH/etc/machine-id" 2>/dev/null || true
+        $ECHO "" >> "$ROOTFS_PATH/etc/machine-id" 2>/dev/null || true
+    fi
+    $CHMOD 444 "$ROOTFS_PATH/etc/machine-id" 2>/dev/null || true
 fi
 
 # --- 1. General Fixes (Init-independent) ---
 
 # Android network group setup (required for socket access on Android kernels)
-log "Setting up Android network groups..."
-$GREP -q '^aid_inet:' "$ROOTFS_PATH/etc/group"    || $ECHO 'aid_inet:x:3003:'    >> "$ROOTFS_PATH/etc/group"
-$GREP -q '^aid_net_raw:' "$ROOTFS_PATH/etc/group" || $ECHO 'aid_net_raw:x:3004:' >> "$ROOTFS_PATH/etc/group"
-$GREP -q '^aid_net_admin:' "$ROOTFS_PATH/etc/group" || $ECHO 'aid_net_admin:x:3005:' >> "$ROOTFS_PATH/etc/group"
+if $TEST -f "$ROOTFS_PATH/etc/group"; then
+    log "Setting up Android network groups..."
+    $GREP -q '^aid_inet:' "$ROOTFS_PATH/etc/group"    || $ECHO 'aid_inet:x:3003:'    >> "$ROOTFS_PATH/etc/group" 2>/dev/null || true
+    $GREP -q '^aid_net_raw:' "$ROOTFS_PATH/etc/group" || $ECHO 'aid_net_raw:x:3004:' >> "$ROOTFS_PATH/etc/group" 2>/dev/null || true
+    $GREP -q '^aid_net_admin:' "$ROOTFS_PATH/etc/group" || $ECHO 'aid_net_admin:x:3005:' >> "$ROOTFS_PATH/etc/group" 2>/dev/null || true
+fi
 
 # Root gets required permissions for networking, input, and display
 log "Granting root permissions for Android hardware access..."
@@ -123,6 +126,40 @@ fi
 log "Fixing package manager user group for internet access..."
 run_in_chroot "grep -q '^_apt:' /etc/passwd && usermod -g aid_inet _apt 2>/dev/null || true"
 run_in_chroot "grep -q '^_tdnf:' /etc/passwd && usermod -g aid_inet _tdnf 2>/dev/null || true"
+
+# Configure APT & DPKG for quiet, non-interactive execution inside container
+if [ -d "$ROOTFS_PATH/etc/apt" ] || [ -f "$ROOTFS_PATH/usr/bin/dpkg" ] || [ -f "$ROOTFS_PATH/bin/dpkg" ]; then
+    log "Configuring APT & DPKG for non-interactive quiet execution..."
+    $MKDIR -p "$ROOTFS_PATH/etc/apt/apt.conf.d" "$ROOTFS_PATH/etc/dpkg/dpkg.cfg.d" 2>/dev/null || true
+    $CAT > "$ROOTFS_PATH/etc/apt/apt.conf.d/99droidspaces" << 'EOF'
+Dpkg::Use-Pty "0";
+quiet "2";
+APT::Install-Recommends "false";
+Dpkg::Options {
+   "--force-confdef";
+   "--force-confold";
+};
+EOF
+    $CAT > "$ROOTFS_PATH/etc/dpkg/dpkg.cfg.d/99droidspaces" << 'EOF'
+force-confdef
+force-confold
+EOF
+fi
+
+# Configure curl to suppress progress bars during package installs & scripts
+$CAT > "$ROOTFS_PATH/etc/curlrc" << 'EOF'
+silent
+show-error
+EOF
+$MKDIR -p "$ROOTFS_PATH/root" "$ROOTFS_PATH/etc/skel" 2>/dev/null || true
+$CAT > "$ROOTFS_PATH/root/.curlrc" << 'EOF'
+silent
+show-error
+EOF
+$CAT > "$ROOTFS_PATH/etc/skel/.curlrc" << 'EOF'
+silent
+show-error
+EOF
 
 # Future users created with adduser automatically get network access
 if $TEST -f "$ROOTFS_PATH/etc/adduser.conf"; then
@@ -624,6 +661,173 @@ if $TEST -f "$ROOTFS_PATH/etc/logrotate.conf"; then
     if ! $GREP -q "maxsize 50M" "$ROOTFS_PATH/etc/logrotate.conf"; then
         $ECHO "maxsize 50M" >> "$ROOTFS_PATH/etc/logrotate.conf"
     fi
+fi
+
+# --- 8. Anland Wayland Desktop & Display Broker Integration ---
+if [ "${ENABLE_ANLAND:-0}" = "1" ]; then
+    log "Configuring Anland Wayland desktop environment..."
+
+    # Write profile drop-in for container shells to attach to the broker automatically
+    $MKDIR -p "$ROOTFS_PATH/etc/profile.d" 2>/dev/null || true
+    cat > "$ROOTFS_PATH/etc/profile.d/anland.sh" << 'EOF'
+# Anland Wayland broker auto-configuration
+[ -z "$WAYLAND_DISPLAY" ] && export WAYLAND_DISPLAY=wayland-0
+[ -z "$DISPLAY" ] && export DISPLAY=:0
+[ -z "$QT_QPA_PLATFORM" ] && export QT_QPA_PLATFORM=wayland
+[ -z "$ANLAND" ] && export ANLAND=1
+[ -z "$ANLAND_SOCKET" ] && export ANLAND_SOCKET=/run/display.sock
+[ -z "$ANLAND_DRM_DEVICE" ] && export ANLAND_DRM_DEVICE=/dev/dri/renderD128
+[ -z "$XDG_SESSION_TYPE" ] && export XDG_SESSION_TYPE=wayland
+[ -z "$XDG_RUNTIME_DIR" ] && export XDG_RUNTIME_DIR="/tmp/runtime-$(id -un 2>/dev/null || echo user)"
+[ -d "$XDG_RUNTIME_DIR" ] || mkdir -p -m 0700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+EOF
+    chmod 0755 "$ROOTFS_PATH/etc/profile.d/anland.sh" 2>/dev/null || true
+
+    # KWin Wayland virtual keyboard configuration
+    mkdir -p "$ROOTFS_PATH/etc/skel/.config" 2>/dev/null || true
+    cat > "$ROOTFS_PATH/etc/skel/.config/kwinrc" <<'EOF'
+[Wayland]
+VirtualKeyboardEnabled=true
+InputMethod[$e]=/usr/share/applications/org.kde.maliit.desktop
+EOF
+fi
+
+# --- 9. Default User Creation ---
+if [ "${CREATE_DEFAULT_USER:-0}" = "1" ] && [ -n "${DEFAULT_USERNAME:-}" ]; then
+    log "Creating default user '$DEFAULT_USERNAME'..."
+    cleanUser="$DEFAULT_USERNAME"
+    cleanShell="${DEFAULT_USER_SHELL:-/bin/bash}"
+
+    # 1. Verify or auto-install requested shell, fallback to bash/sh if missing
+    run_in_chroot "
+        targetShell='$cleanShell'
+        if ! [ -x \"\$targetShell\" ] && ! command -v \"\$targetShell\" >/dev/null 2>&1; then
+            pkgName=\"\$(basename \"\$targetShell\")\"
+            if command -v apt-get >/dev/null 2>&1; then
+                DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+                DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"\$pkgName\" >/dev/null 2>&1 || true
+            elif command -v dnf >/dev/null 2>&1; then
+                dnf install -y \"\$pkgName\" >/dev/null 2>&1 || true
+            elif command -v pacman >/dev/null 2>&1; then
+                pacman -Sy --noconfirm \"\$pkgName\" >/dev/null 2>&1 || true
+            elif command -v apk >/dev/null 2>&1; then
+                apk add --no-cache \"\$pkgName\" >/dev/null 2>&1 || true
+            fi
+        fi
+
+        if ! [ -x \"\$targetShell\" ] && ! command -v \"\$targetShell\" >/dev/null 2>&1; then
+            targetShell=\"\$(command -v bash 2>/dev/null || command -v sh 2>/dev/null || echo /bin/sh)\"
+        fi
+
+        if command -v useradd >/dev/null 2>&1; then
+            useradd -m -s \"\$targetShell\" '$cleanUser' 2>&1 || useradd -s \"\$targetShell\" '$cleanUser' 2>&1
+        elif command -v adduser >/dev/null 2>&1; then
+            adduser -D -s \"\$targetShell\" '$cleanUser' 2>&1 || adduser '$cleanUser' 2>&1
+        else
+            echo 'Neither useradd nor adduser found' >&2
+            exit 1
+        fi
+
+        userHome=\"\$(getent passwd '$cleanUser' | cut -d: -f6)\"
+        if [ -n \"\$userHome\" ] && [ -d \"\$userHome\" ]; then
+            touch \"\$userHome/.zshrc\" 2>/dev/null || true
+            touch \"\$userHome/.bashrc\" 2>/dev/null || true
+            mkdir -p \"\$userHome/.config\" 2>/dev/null || true
+            chown -R '$cleanUser:$cleanUser' \"\$userHome\" 2>/dev/null || true
+        fi
+        mkdir -p /etc/zsh 2>/dev/null || true
+        touch /etc/zsh/zshrc 2>/dev/null || true
+    "
+
+    # 2. Set password if provided
+    if [ -n "${DEFAULT_PASSWORD_B64:-}" ]; then
+        run_in_chroot "echo '$DEFAULT_PASSWORD_B64' | base64 -d | chpasswd 2>&1 || true"
+    elif [ -n "${DEFAULT_PASSWORD:-}" ]; then
+        run_in_chroot "echo '$cleanUser:$DEFAULT_PASSWORD' | chpasswd 2>&1 || true"
+    fi
+
+    # 3. Android network, hardware, DRM, and GPU access groups (including shadow for lockscreen PAM)
+    run_in_chroot "for grp in aid_inet aid_net_raw input video render droidspaces-gpu tty audio shadow aid_graphics aid_sdcard_rw aid_media_rw aid_everybody; do
+        if getent group \"\$grp\" >/dev/null 2>&1; then
+            usermod -aG \"\$grp\" '$cleanUser' 2>/dev/null || adduser '$cleanUser' \"\$grp\" 2>/dev/null || gpasswd -a '$cleanUser' \"\$grp\" 2>/dev/null || true
+        fi
+    done"
+
+    # 4. Sudo / Root privileges if requested
+    if [ "${DEFAULT_USER_SUDO:-1}" = "1" ]; then
+        run_in_chroot "for grp in sudo wheel admin; do
+            if getent group \"\$grp\" >/dev/null 2>&1; then
+                usermod -aG \"\$grp\" '$cleanUser' 2>/dev/null || adduser '$cleanUser' \"\$grp\" 2>/dev/null || gpasswd -a '$cleanUser' \"\$grp\" 2>/dev/null || true
+            fi
+        done
+        if [ -d /etc/sudoers.d ]; then
+            echo '$cleanUser ALL=(ALL) ALL' > '/etc/sudoers.d/90-$cleanUser'
+            chmod 0440 '/etc/sudoers.d/90-$cleanUser'
+        fi"
+    fi
+
+    log "Default user '$cleanUser' created successfully"
+fi
+
+# Update desktop services to run as default user if configured
+targetUser="${DEFAULT_USERNAME:-}"
+if [ -z "$targetUser" ]; then
+    targetUser=$(awk -F: '$3 >= 1000 && $3 < 65534 {print $1; exit}' "$ROOTFS_PATH/etc/passwd" 2>/dev/null || echo "")
+fi
+if [ -n "$targetUser" ]; then
+    for srv in "$ROOTFS_PATH/etc/systemd/system/plasma-wayland.service" "$ROOTFS_PATH/etc/systemd/system/plasma-mobile.service" "$ROOTFS_PATH/etc/systemd/system/plasma-x11.service" "$ROOTFS_PATH/etc/systemd/system/niri.service" "$ROOTFS_PATH/etc/systemd/system/noctalia.service" "$ROOTFS_PATH/etc/systemd/system/xfce-autostart.service" "$ROOTFS_PATH/etc/systemd/system/"*-autostart.service; do
+        if [ -f "$srv" ]; then
+            $SED -i "s/^User=.*/User=$targetUser/" "$srv" 2>/dev/null || true
+            log "Configured $(basename "$srv") User=$targetUser"
+        fi
+    done
+fi
+
+# Install USB Manager if requested
+if [ "${INSTALL_USB_MANAGER:-0}" = "1" ] && [ -f "$ROOTFS_PATH/usr/local/sbin/install-usb-manager.sh" ]; then
+    log "Installing Droidspaces USB Manager..."
+    userArg=""
+    [ -n "$targetUser" ] && userArg="--user $targetUser"
+    run_in_chroot "/usr/local/sbin/install-usb-manager.sh $userArg 2>&1 || true"
+fi
+
+# Clean up any malformed 'export ' prefixes in /etc/environment
+if [ -f "$ROOTFS_PATH/etc/environment" ]; then
+    log "Cleaning up malformed 'export' statements in /etc/environment..."
+    $SED -i 's/^[[:space:]]*export[[:space:]]\+//g' "$ROOTFS_PATH/etc/environment" 2>/dev/null || true
+fi
+
+# --- 10. KDE Wayland Runtime Directory Fix ---
+# /run/user/$uid is a tmpfs that Android containers do not auto-create.
+# Use /tmp/runtime-USERNAME instead, always writable without special permissions.
+log "Applying KDE Wayland runtime directory fixes..."
+
+# Write a profile drop-in that creates XDG_RUNTIME_DIR under /tmp on login
+$MKDIR -p "$ROOTFS_PATH/etc/profile.d" 2>/dev/null || true
+$CAT > "$ROOTFS_PATH/etc/profile.d/droidspaces-xdg.sh" << 'PROF_EOF'
+# Droidspaces: set XDG_RUNTIME_DIR to /tmp/runtime-<username> (works in Android containers)
+if [ -z "$XDG_RUNTIME_DIR" ]; then
+    export XDG_RUNTIME_DIR="/tmp/runtime-$(id -un 2>/dev/null || echo user)"
+fi
+mkdir -p -m 0700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+PROF_EOF
+$CHMOD 0755 "$ROOTFS_PATH/etc/profile.d/droidspaces-xdg.sh" 2>/dev/null || true
+
+# Remove any stale /run/user/*/XDG_RUNTIME_DIR from /etc/environment to avoid confusion
+if $GREP -q "^XDG_RUNTIME_DIR=/run/user" "$ROOTFS_PATH/etc/environment" 2>/dev/null; then
+    $SED -i '/^XDG_RUNTIME_DIR=\/run\/user/d' "$ROOTFS_PATH/etc/environment"
+    log "Removed stale XDG_RUNTIME_DIR=/run/user/* from /etc/environment"
+fi
+
+# Keep /run/user structure in tmpfiles.d for distros that do run systemd properly
+if $TEST -f "$ROOTFS_PATH/usr/bin/systemctl" || $TEST -f "$ROOTFS_PATH/bin/systemctl"; then
+    log "Configuring systemd-tmpfiles for runtime directories..."
+    $MKDIR -p "$ROOTFS_PATH/etc/tmpfiles.d" 2>/dev/null || true
+    $CAT > "$ROOTFS_PATH/etc/tmpfiles.d/droidspaces-runtime.conf" << 'EOF'
+# Runtime dirs: /run/user for full systemd, /tmp/runtime-* always
+d /run/user 0755 root root -
+d /run/user/1000 0700 1000 1000 -
+EOF
 fi
 
 # Mark fixes as completed

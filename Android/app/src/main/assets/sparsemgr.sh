@@ -365,6 +365,89 @@ _to_mb() {
     esac
 }
 
+# CMD: unpack (Convert Image -> Directory)
+cmd_unpack() {
+    local target_dir="$1"
+    [ -z "$target_dir" ] && target_dir="$BASE_DIR"
+
+    if [ -z "$RESIZE_IMG" ] && [ -n "$ROOTFS_IMG" ]; then
+        RESIZE_IMG="$ROOTFS_IMG"
+    fi
+
+    if [ -z "$RESIZE_IMG" ] || [ ! -f "$RESIZE_IMG" ]; then
+        error "Sparse image not found: $RESIZE_IMG"
+        exit 1
+    fi
+
+    if [ -z "$target_dir" ]; then
+        error "Destination directory required (-d <target_dir>)"
+        exit 1
+    fi
+
+    log " Unpack: sparse image -> directory"
+    log "   Image       : $RESIZE_IMG"
+    log "   Destination : $target_dir"
+
+    # Step 1: Health check on image before unpack
+    log "[1/5] Checking image filesystem integrity (e2fsck)..."
+    if ! e2fsck -fy "$RESIZE_IMG" 2>/dev/null; then
+        warn "e2fsck reported minor corrections, checking again..."
+        if ! e2fsck -fy "$RESIZE_IMG" 2>/dev/null; then
+            error "Image filesystem check failed"
+            exit 1
+        fi
+    fi
+    log "    Image filesystem is healthy ✓"
+
+    # Step 2: Ensure destination directory exists and test POSIX support
+    log "[2/5] Checking destination filesystem compatibility..."
+    _mkdir "$target_dir"
+    local test_symlink="$target_dir/.symlink_test_$$"
+    if ln -s "test" "$test_symlink" 2>/dev/null; then
+        _rm -f "$test_symlink"
+        log "    Destination supports symlinks and POSIX permissions ✓"
+    else
+        warn "Destination does not appear to support POSIX symlinks (FAT/exFAT filesystem?)"
+        warn "Directory mode requires a native Linux filesystem (ext4/f2fs)."
+    fi
+
+    # Step 3: Mount image read-only at temp mountpoint
+    log "[3/5] Mounting image..."
+    local temp_mount="/mnt/ds_unpack_${$}"
+    _mkdir "$temp_mount"
+    if ! _mount -t ext4 -o loop,ro,dev,suid "$RESIZE_IMG" "$temp_mount"; then
+        error "Failed to mount $RESIZE_IMG at $temp_mount"
+        _rm -rf "$temp_mount"
+        exit 1
+    fi
+    log "    Mounted at $temp_mount ✓"
+
+    # Step 4: Extract files to target_dir via _copy_rootfs
+    log "[4/5] Extracting rootfs to $target_dir (this may take a while)..."
+    if ! _copy_rootfs "$temp_mount" "$target_dir"; then
+        error "Failed to extract rootfs files to $target_dir"
+        _umount "$temp_mount" 2>/dev/null || _umount -l "$temp_mount" 2>/dev/null || true
+        _rm -rf "$temp_mount"
+        exit 1
+    fi
+    log "    Extraction complete ✓"
+
+    # Step 5: Unmount and clean up
+    log "[5/5] Finalizing..."
+    _sync
+    _umount "$temp_mount" 2>/dev/null || _umount -l "$temp_mount" 2>/dev/null || true
+    _rm -rf "$temp_mount"
+
+    # Backup original image by renaming to .bak
+    if [ -f "$RESIZE_IMG" ]; then
+        _mv "$RESIZE_IMG" "${RESIZE_IMG}.bak" 2>/dev/null || true
+    fi
+
+    log ""
+    log "Conversion to directory complete!"
+    log "   Rootfs Directory : $target_dir"
+}
+
 # CMD: resize
 cmd_resize() {
     local new_size_gb="$1"
@@ -529,18 +612,116 @@ cmd_resize() {
 }
 
 
+# Repair ext4 metadata and reclaim free ranges from a sparse image.
+cmd_compact() {
+    [ -f "$RESIZE_IMG" ] || { error "Image does not exist: $RESIZE_IMG"; exit 1; }
+    command -v e2fsck >/dev/null 2>&1 || { error "e2fsck not found"; exit 1; }
+    [ -n "$BB" ] || { error "Bundled BusyBox not found"; exit 1; }
+
+    if command -v losetup >/dev/null 2>&1 && losetup -j "$RESIZE_IMG" 2>/dev/null | grep -q .; then
+        error "Image is still attached to a loop device"
+        exit 1
+    fi
+
+    local before_allocated after_allocated fsck_exit
+    before_allocated=$(_du_h "$RESIZE_IMG")
+
+    log "Checking filesystem and discarding free ext4 blocks..."
+    e2fsck -f -y -E discard "$RESIZE_IMG"
+    fsck_exit=$?
+    if [ "$fsck_exit" -ge 4 ]; then
+        error "Filesystem repair failed (e2fsck exit $fsck_exit)"
+        exit "$fsck_exit"
+    fi
+
+    # Optional fstrim via temporary loop mount
+    if [ "${FSTRIM_FLAG:-0}" = "1" ]; then
+        log "Running fstrim on temporary loop mount..."
+        local temp_mount
+        temp_mount="$(dirname "$RESIZE_IMG")/.fstrim_mnt_$$"
+        _mkdir "$temp_mount"
+        if _mount -t ext4 -o loop "$RESIZE_IMG" "$temp_mount" 2>/dev/null; then
+            if command -v fstrim >/dev/null 2>&1; then
+                fstrim -v "$temp_mount" 2>&1 || true
+            elif [ -n "$BB" ] && "$BB" fstrim --help >/dev/null 2>&1; then
+                "$BB" fstrim -v "$temp_mount" 2>&1 || true
+            fi
+            _umount "$temp_mount" 2>/dev/null || true
+            log "fstrim completed ✓"
+        else
+            warn "Could not loop-mount image for fstrim (e2fsck discard handled free blocks)"
+        fi
+        _rm -rf "$temp_mount"
+    fi
+
+    # Optional shrink to match utilized content size
+    if [ "${SHRINK_FLAG:-0}" = "1" ]; then
+        log "Calculating minimum safe capacity to shrink image..."
+        local actual_size actual_mb min_safe_gb
+        actual_size=$(_du_h "$RESIZE_IMG")
+        if [ "$actual_size" != "unknown" ]; then
+            actual_mb=$(_to_mb "$actual_size")
+            min_safe_gb=$(_awk_calc "($actual_mb * 1.15 + 512) / 1024")
+            [ "$min_safe_gb" -lt 4 ] && min_safe_gb=4
+            local current_cap_bytes current_cap_gb
+            current_cap_bytes=$(_stat_size "$RESIZE_IMG")
+            current_cap_gb=$(_awk_calc "$current_cap_bytes / 1073741824")
+            if [ "$min_safe_gb" -lt "$current_cap_gb" ]; then
+                log "Shrinking virtual capacity: ${current_cap_gb}G -> ${min_safe_gb}G..."
+                e2fsck -f -y "$RESIZE_IMG" 2>/dev/null || true
+                if resize2fs -f "$RESIZE_IMG" "${min_safe_gb}G" 2>&1; then
+                    _truncate "${min_safe_gb}G" "$RESIZE_IMG" || true
+                    e2fsck -f -y -E discard "$RESIZE_IMG" 2>/dev/null || true
+                    log "Capacity compacted to ${min_safe_gb}G ✓"
+                else
+                    warn "resize2fs failed to shrink filesystem directly; continuing with hole punching"
+                fi
+            else
+                log "Capacity (${current_cap_gb}G) is already at or near utilized minimum (${min_safe_gb}G)"
+            fi
+        fi
+    fi
+
+    # e2fsck's unix-file backend punches most free ranges itself. Digging holes
+    # also reclaims any all-zero ranges left by older e2fsprogs versions.
+    log "Punching holes in zero-filled ranges..."
+    if command -v fallocate >/dev/null 2>&1 && fallocate -d "$RESIZE_IMG" 2>/dev/null; then
+        log "Hole punching complete (fallocate -d) ✓"
+    elif [ -n "$BB" ] && "$BB" fallocate -d "$RESIZE_IMG" 2>/dev/null; then
+        log "Hole punching complete (busybox fallocate -d) ✓"
+    elif cp --sparse=always "$RESIZE_IMG" "${RESIZE_IMG}.compact_tmp" 2>/dev/null; then
+        mv -f "${RESIZE_IMG}.compact_tmp" "$RESIZE_IMG"
+        log "Hole punching complete (sparse copy) ✓"
+    elif [ -n "$BB" ] && "$BB" cp --sparse=always "$RESIZE_IMG" "${RESIZE_IMG}.compact_tmp" 2>/dev/null; then
+        mv -f "${RESIZE_IMG}.compact_tmp" "$RESIZE_IMG"
+        log "Hole punching complete (busybox sparse copy) ✓"
+    else
+        log "Free blocks discarded by e2fsck ✓"
+    fi
+    "$BB" sync 2>/dev/null || sync
+
+    after_allocated=$(_du_h "$RESIZE_IMG")
+    log "Repair and compaction complete"
+    log "Allocated storage: $before_allocated -> $after_allocated"
+}
+
+
 # Usage
 
 usage() {
     echo "Usage:"
     echo "  $SCRIPT_NAME -d <base_dir> migrate <size_gb>"
     echo "  $SCRIPT_NAME -i <image>    resize  <size_gb>"
+    echo "  $SCRIPT_NAME -i <image>    compact"
     echo ""
     echo "Options:"
     echo "  -d, --dir <path>      Base directory containing rootfs/ (for migrate)"
     echo "                        Derives rootfs/ and rootfs.img from this path"
-    echo "  -i, --image <file>    Path to an existing sparse image (for resize)"
+    echo "  -i, --image <file>    Path to an existing sparse image (for resize/compact)"
+    echo "  -o, --output <path>   Custom output path for image or unpacked directory"
     echo "  -y, --yes             Skip confirmation prompts"
+    echo "  --fstrim              Run fstrim during compaction"
+    echo "  --shrink              Shrink virtual capacity during compaction"
     echo "  -h, --help            Show this help and exit"
     echo ""
     echo "Commands:"
@@ -548,6 +729,8 @@ usage() {
     echo "                        size: 4-512 GB"
     echo "  resize  <size_gb>     Resize an existing sparse image"
     echo "                        size: 4-512 GB"
+    echo "  compact               Repair ext4 and reclaim unused sparse-image blocks"
+    echo "  unpack  [target_dir]  Convert sparse ext4 image back to directory layout"
     echo ""
     echo "BusyBox:"
     echo "  Default path  : /data/local/Droidspaces/bin/busybox"
@@ -561,7 +744,7 @@ usage() {
     echo "Examples:"
     echo "  $SCRIPT_NAME -d /data/local/ubuntu migrate 16"
     echo "  $SCRIPT_NAME -i /data/local/ubuntu/rootfs.img resize 32"
-    echo "  $SCRIPT_NAME -i /data/local/ubuntu/rootfs.img resize 8 --yes"
+    echo "  $SCRIPT_NAME -i /data/local/ubuntu/rootfs.img compact"
     echo ""
     echo "Notes:"
     echo "  - Unmount the image/rootfs before running either command."
@@ -576,9 +759,12 @@ usage() {
 
 BASE_DIR=""
 RESIZE_IMG=""
+OUTPUT_PATH=""
 COMMAND=""
 CMD_ARG=""
 YES_FLAG=0
+FSTRIM_FLAG=0
+SHRINK_FLAG=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -588,14 +774,21 @@ while [ $# -gt 0 ]; do
         -i|--image)
             [ -z "$2" ] && { error "--image requires a file path argument"; exit 1; }
             RESIZE_IMG="$2"; shift 2 ;;
+        -o|--output)
+            [ -z "$2" ] && { error "--output requires a path argument"; exit 1; }
+            OUTPUT_PATH="$2"; shift 2 ;;
         -y|--yes)
             YES_FLAG=1; shift ;;
+        --fstrim)
+            FSTRIM_FLAG=1; shift ;;
+        --shrink)
+            SHRINK_FLAG=1; shift ;;
         -h|--help)
             usage 0 ;;
-        migrate|resize)
+        migrate|resize|compact|unpack)
             COMMAND="$1"
             shift
-            # Grab the size argument (next positional, if not a flag)
+            # Grab the next positional argument (if not a flag)
             if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
                 CMD_ARG="$1"; shift
             fi
@@ -604,7 +797,7 @@ while [ $# -gt 0 ]; do
             error "Unknown option: $1"
             usage 1 ;;
         *)
-            # Bare positional: treat as size argument if command already set
+            # Bare positional: treat as argument if command already set
             if [ -n "$COMMAND" ] && [ -z "$CMD_ARG" ]; then
                 CMD_ARG="$1"; shift
             else
@@ -630,15 +823,15 @@ case "$COMMAND" in
             usage 1
         fi
         ;;
-    resize)
+    resize|compact|unpack)
         if [ -z "$RESIZE_IMG" ]; then
-            error "resize requires -i <image>"
+            error "$COMMAND requires -i <image>"
             usage 1
         fi
         ;;
 esac
 
-if [ -z "$CMD_ARG" ]; then
+if [ "$COMMAND" != "compact" ] && [ "$COMMAND" != "unpack" ] && [ -z "$CMD_ARG" ]; then
     error "Size argument required (e.g. '$SCRIPT_NAME ... $COMMAND 16')"
     usage 1
 fi
@@ -659,9 +852,13 @@ if [ "$COMMAND" = "migrate" ]; then
         error "Base directory does not exist: $BASE_DIR"
         exit 1
     fi
-    ROOTFS_DIR="$BASE_DIR/rootfs"
-    ROOTFS_IMG="$BASE_DIR/rootfs.img"
-    ROOTFS_SPARSE="$BASE_DIR/rootfs.sparse"   # temp mount point during migration
+    if [ -d "$BASE_DIR/rootfs" ] && [ -n "$(ls -A "$BASE_DIR/rootfs" 2>/dev/null)" ]; then
+        ROOTFS_DIR="$BASE_DIR/rootfs"
+    else
+        ROOTFS_DIR="$BASE_DIR"
+    fi
+    ROOTFS_IMG="${OUTPUT_PATH:-$BASE_DIR/rootfs.img}"
+    ROOTFS_SPARSE="$BASE_DIR/rootfs.sparse.$$"   # temp mount point during migration
 fi
 
 # Dispatch
@@ -669,4 +866,6 @@ fi
 case "$COMMAND" in
     migrate) cmd_migrate "$CMD_ARG" ;;
     resize)  cmd_resize  "$CMD_ARG" ;;
+    compact) cmd_compact ;;
+    unpack)  cmd_unpack  "${CMD_ARG:-${OUTPUT_PATH:-$BASE_DIR}}" ;;
 esac

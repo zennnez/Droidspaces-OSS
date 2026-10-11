@@ -63,5 +63,19 @@ object ContainerCommandBuilder {
 
     /** JSON of every kernel capability probe, one 0/1 per key. */
     fun buildCheckCommand(): String = "$DROIDSPACES_BINARY_PATH --format check"
+
+    /**
+     * Technical information for a container (UPTIME, RAM, CPU).
+     */
+    fun buildUsageCommand(containerName: String): String {
+        return "$DROIDSPACES_BINARY_PATH --name=${quote(containerName)} --format info"
+    }
+
+    /**
+     * Build command to get IP addresses of a container.
+     */
+    fun buildGetIpCommand(containerName: String): String {
+        return "$DROIDSPACES_BINARY_PATH --name=${quote(containerName)} run 'ip -4 addr show 2>/dev/null | awk \"/inet / && \\\$2 !~ /^127/ {split(\\\$2,a,\\\"/\\\"); print a[1]}\" | tr \"\\n\" \" \" || echo'"
+    }
 }
 

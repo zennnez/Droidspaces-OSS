@@ -74,3 +74,41 @@ allow mediaserver droidspacesd fd use
 
 # fix permission denied when read/write mounted storage (#213)
 allow mediaprovider_app droidspacesd fd use
+
+# for anland (Wayland display consumer app and DRI3 buffer sharing)
+allow untrusted_app droidspacesd fd use
+allow untrusted_app_27 droidspacesd fd use
+allow untrusted_app_29 droidspacesd fd use
+allow untrusted_app_30 droidspacesd fd use
+allow untrusted_app_32 droidspacesd fd use
+allow untrusted_app_33 droidspacesd fd use
+allow untrusted_app_34 droidspacesd fd use
+allow untrusted_app_35 droidspacesd fd use
+allow untrusted_app_all droidspacesd fd use
+allow untrusted_app droidspacesd fifo_file write
+allow untrusted_app_27 droidspacesd fifo_file write
+allow untrusted_app_33 droidspacesd fifo_file write
+allow untrusted_app_34 droidspacesd fifo_file write
+allow untrusted_app_35 droidspacesd fifo_file write
+allow untrusted_app_all droidspacesd fifo_file write
+allow untrusted_app droidspacesd unix_stream_socket { connectto read write }
+allow untrusted_app_27 droidspacesd unix_stream_socket { connectto read write }
+allow untrusted_app_33 droidspacesd unix_stream_socket { connectto read write }
+allow untrusted_app_34 droidspacesd unix_stream_socket { connectto read write }
+allow untrusted_app_35 droidspacesd unix_stream_socket { connectto read write }
+allow untrusted_app_all droidspacesd unix_stream_socket { connectto read write }
+allow untrusted_app su unix_stream_socket { read write }
+allow untrusted_app_27 su unix_stream_socket { read write }
+allow surfaceflinger droidspacesd fd use
+allow hal_graphics_composer_default droidspacesd fd use
+
+# for sparse loop images and external storage mounts
+allow kernel sdcardfs file { getattr open read write }
+allow kernel fuse file { getattr open read write }
+allow kernel media_rw_data_file file { getattr open read write }
+allow droidspacesd loop_control_device chr_file { ioctl open read write getattr setattr }
+allow droidspacesd loop_device blk_file { ioctl open read write getattr setattr }
+allow droidspacesd vold_data_file file { getattr open read write map create unlink }
+allow droidspacesd media_rw_data_file file { getattr open read write map create unlink }
+allow droidspacesd sdcardfs file { getattr open read write map create unlink }
+allow droidspacesd fuse file { getattr open read write map create unlink }
