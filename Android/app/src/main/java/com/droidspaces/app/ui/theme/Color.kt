@@ -46,6 +46,54 @@ enum class ThemePalette(
     // hues at tone 70 with the chroma pushed up (60, 36, 48 in HCT).
     val swatch: List<Color>? = null,
 ) {
+    // The Material You scheme One UI built from a green wallpaper, seed #8CB496 in the
+    // Tonal Spot style, read off the phone's system_* colour resources
+    BROCCOLI(
+        displayName = "Broccoli",
+        swatch = listOf(Color(0xFF35C278), Color(0xFF7AB98E), Color(0xFF2EBAD8)),
+        primaryLight = Color(0xFF2D6A45),   // Green
+        secondaryLight = Color(0xFF4F6354), // Grey Green
+        tertiaryLight = Color(0xFF3B6470),  // Teal
+        primaryDark = Color(0xFF95D5A8),    // Light Green
+        secondaryDark = Color(0xFFB6CCB9),  // Pale Grey Green
+        tertiaryDark = Color(0xFFA3CDDA),   // Light Teal
+        fixedLight = lightColorScheme(
+            primary = Color(0xFF2D6A45), onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFFB0F1C2), onPrimaryContainer = Color(0xFF00210F),
+            inversePrimary = Color(0xFF95D5A8),
+            secondary = Color(0xFF4F6354), onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFFD1E8D4), onSecondaryContainer = Color(0xFF0D1F13),
+            tertiary = Color(0xFF3B6470), onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFBEEAF7), onTertiaryContainer = Color(0xFF001F26),
+            background = Color(0xFFF6FBF3), onBackground = Color(0xFF181D19),
+            surface = Color(0xFFF6FBF3), onSurface = Color(0xFF181D19),
+            surfaceVariant = Color(0xFFDCE5DB), onSurfaceVariant = Color(0xFF414942),
+            inverseSurface = Color(0xFF2C322D), inverseOnSurface = Color(0xFFEDF2EB),
+            outline = Color(0xFF717971), outlineVariant = Color(0xFFC0C9BF),
+            surfaceBright = Color(0xFFF6FBF3), surfaceDim = Color(0xFFD6DBD4),
+            surfaceContainerLowest = Color(0xFFFFFFFF), surfaceContainerLow = Color(0xFFF0F5EE),
+            surfaceContainer = Color(0xFFEAEFE8), surfaceContainerHigh = Color(0xFFE5EAE2),
+            surfaceContainerHighest = Color(0xFFDFE4DD),
+        ),
+        fixedDark = darkColorScheme(
+            primary = Color(0xFF95D5A8), onPrimary = Color(0xFF00391D),
+            primaryContainer = Color(0xFF0F512F), onPrimaryContainer = Color(0xFFB0F1C2),
+            inversePrimary = Color(0xFF2D6A45),
+            secondary = Color(0xFFB6CCB9), onSecondary = Color(0xFF223527),
+            secondaryContainer = Color(0xFF384B3D), onSecondaryContainer = Color(0xFFD1E8D4),
+            tertiary = Color(0xFFA3CDDA), onTertiary = Color(0xFF023640),
+            tertiaryContainer = Color(0xFF214C57), onTertiaryContainer = Color(0xFFBEEAF7),
+            background = Color(0xFF0F1511), onBackground = Color(0xFFDFE4DD),
+            surface = Color(0xFF0F1511), onSurface = Color(0xFFDFE4DD),
+            surfaceVariant = Color(0xFF414942), onSurfaceVariant = Color(0xFFC0C9BF),
+            inverseSurface = Color(0xFFDFE4DD), inverseOnSurface = Color(0xFF2C322D),
+            outline = Color(0xFF8B938A), outlineVariant = Color(0xFF414942),
+            surfaceBright = Color(0xFF353B36), surfaceDim = Color(0xFF0F1511),
+            surfaceContainerLowest = Color(0xFF0A0F0B), surfaceContainerLow = Color(0xFF181D19),
+            surfaceContainer = Color(0xFF1C211C), surfaceContainerHigh = Color(0xFF262B27),
+            surfaceContainerHighest = Color(0xFF313631),
+        ),
+    ),
     // The Material You scheme One UI built from a gold wallpaper, seed #CFA369 in the
     // Tonal Spot style, read off the phone's system_* colour resources
     SAND(
