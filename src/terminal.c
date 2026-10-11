@@ -14,6 +14,9 @@
  * TIOCGPTPEER (4.13+) opens slave directly from master fd.
  * Falls back to TIOCGPTN + path open for kernel 3.x. */
 int ds_openpty(int *master, int *slave, char *name) {
+  if (name)
+    memset(name, 0, PATH_MAX);
+
   int m = open("/dev/ptmx", O_RDWR | O_NOCTTY | O_CLOEXEC);
   if (m < 0)
     return -1;
@@ -23,18 +26,25 @@ int ds_openpty(int *master, int *slave, char *name) {
   int unlock = 0;
   (void)ioctl(m, TIOCSPTLCK, &unlock);
 
+  int s = -1;
   /* try kernel 4.13+ path-free method first */
-  int s = ioctl(m, TIOCGPTPEER, O_RDWR | O_NOCTTY | O_CLOEXEC);
+  s = ioctl(m, TIOCGPTPEER, O_RDWR | O_NOCTTY | O_CLOEXEC);
   if (s >= 0) {
     if (name) {
-      unsigned int ptyno;
+      unsigned int ptyno = 0;
       if (ioctl(m, TIOCGPTN, &ptyno) == 0) {
         snprintf(name, PATH_MAX, "/dev/pts/%u", ptyno);
+      } else {
+        char proc_fd[64];
+        snprintf(proc_fd, sizeof(proc_fd), "/proc/self/fd/%d", s);
+        ssize_t len = readlink(proc_fd, name, PATH_MAX - 1);
+        if (len > 0)
+          name[len] = '\0';
       }
     }
   } else {
     /* fallback: build /dev/pts/N path */
-    unsigned int ptyno;
+    unsigned int ptyno = 0;
     if (ioctl(m, TIOCGPTN, &ptyno) < 0)
       goto err;
     char pts_path[PATH_MAX];
@@ -46,11 +56,24 @@ int ds_openpty(int *master, int *slave, char *name) {
       goto err;
   }
 
+  /* Final verification of slave path */
+  if (name && (name[0] == '\0' || access(name, F_OK) != 0)) {
+    if (s >= 0) {
+      char proc_fd[64];
+      snprintf(proc_fd, sizeof(proc_fd), "/proc/self/fd/%d", s);
+      ssize_t len = readlink(proc_fd, name, PATH_MAX - 1);
+      if (len > 0)
+        name[len] = '\0';
+    }
+  }
+
   *master = m;
   *slave = s;
   return 0;
 err:
   close(m);
+  if (name)
+    name[0] = '\0';
   return -1;
 }
 
