@@ -142,6 +142,54 @@ enum class ThemePalette(
             surfaceContainerHighest = Color(0xFF3B342B),
         ),
     ),
+    // One UI's default theme with no wallpaper palette applied, at the lowest contrast
+    // level, read off the phone's system_* colour resources
+    ONE_UI(
+        displayName = "One UI",
+        swatch = listOf(Color(0xFF86A9FF), Color(0xFF96AAE4), Color(0xFFDB92DD)),
+        primaryLight = Color(0xFF2A4174),   // Navy
+        secondaryLight = Color(0xFF3C4255), // Slate
+        tertiaryLight = Color(0xFF553A55),  // Plum
+        primaryDark = Color(0xFFB7CAFF),    // Periwinkle
+        secondaryDark = Color(0xFFC4CAE1),  // Light Slate
+        tertiaryDark = Color(0xFFE4BFE2),   // Light Plum
+        fixedLight = lightColorScheme(
+            primary = Color(0xFF2A4174), onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFF5E73A9), onPrimaryContainer = Color(0xFFFFFFFF),
+            inversePrimary = Color(0xFFB7CAFF),
+            secondary = Color(0xFF3C4255), onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFF6E7488), onSecondaryContainer = Color(0xFFFFFFFF),
+            tertiary = Color(0xFF553A55), onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFF8A6A89), onTertiaryContainer = Color(0xFFFFFFFF),
+            background = Color(0xFFFAF8FF), onBackground = Color(0xFF1A1B20),
+            surface = Color(0xFFFAF8FF), onSurface = Color(0xFF1A1B20),
+            surfaceVariant = Color(0xFFE1E2EC), onSurfaceVariant = Color(0xFF40434B),
+            inverseSurface = Color(0xFF2F3036), inverseOnSurface = Color(0xFFF1F0F7),
+            outline = Color(0xFF5D5F67), outlineVariant = Color(0xFF797A83),
+            surfaceBright = Color(0xFFFAF8FF), surfaceDim = Color(0xFFDAD9E0),
+            surfaceContainerLowest = Color(0xFFFFFFFF), surfaceContainerLow = Color(0xFFF4F3FA),
+            surfaceContainer = Color(0xFFEEEDF4), surfaceContainerHigh = Color(0xFFE8E7EF),
+            surfaceContainerHighest = Color(0xFFE2E2E9),
+        ),
+        fixedDark = darkColorScheme(
+            primary = Color(0xFFB7CAFF), onPrimary = Color(0xFF00143B),
+            primaryContainer = Color(0xFF7A90C8), onPrimaryContainer = Color(0xFF000000),
+            inversePrimary = Color(0xFF2A4174),
+            secondary = Color(0xFFC4CAE1), onSecondary = Color(0xFF0F1626),
+            secondaryContainer = Color(0xFF8A90A5), onSecondaryContainer = Color(0xFF000000),
+            tertiary = Color(0xFFE4BFE2), onTertiary = Color(0xFF240D26),
+            tertiaryContainer = Color(0xFFA886A6), onTertiaryContainer = Color(0xFF000000),
+            background = Color(0xFF121318), onBackground = Color(0xFFE2E2E9),
+            surface = Color(0xFF121318), onSurface = Color(0xFFFCFAFF),
+            surfaceVariant = Color(0xFF44464F), onSurfaceVariant = Color(0xFFC9CAD4),
+            inverseSurface = Color(0xFFE2E2E9), inverseOnSurface = Color(0xFF2F3036),
+            outline = Color(0xFFA1A2AC), outlineVariant = Color(0xFF81838C),
+            surfaceBright = Color(0xFF38393F), surfaceDim = Color(0xFF121318),
+            surfaceContainerLowest = Color(0xFF0C0E13), surfaceContainerLow = Color(0xFF1A1B20),
+            surfaceContainer = Color(0xFF1E1F25), surfaceContainerHigh = Color(0xFF282A2F),
+            surfaceContainerHighest = Color(0xFF33343A),
+        ),
+    ),
     CATPPUCCIN(
         displayName = "Catppuccin",
         primaryLight = Color(0xFF8AADF4),   // Blue
