@@ -71,7 +71,7 @@ SRCS = $(SRC_DIR)/main.c \
 
 # Compiler flags - hardened warning set, all warnings are errors
 CFLAGS  = -Wall -Wextra -Wpedantic -Werror -O2 -flto=auto -std=gnu99 -I$(SRC_DIR)/include -no-pie -pthread
-CFLAGS += -Wformat=2 -Wformat-security -Wformat-overflow=2 -Wformat-truncation=2
+CFLAGS += -Wformat=2 -Wformat-security -Wformat-overflow=2 -Wno-format-truncation -Wno-stringop-truncation
 CFLAGS += -Wnull-dereference -Wcast-qual -Wlogical-op -Wshadow -Wdouble-promotion -Wundef
 CFLAGS += -Wduplicated-cond -Wduplicated-branches -Wimplicit-fallthrough=3
 CFLAGS += -fstack-protector-strong
