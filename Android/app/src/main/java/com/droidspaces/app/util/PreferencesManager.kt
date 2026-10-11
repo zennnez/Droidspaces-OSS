@@ -414,6 +414,19 @@ class PreferencesManager private constructor(context: Context) {
         prefs.edit().putString("terminal_last_user_$containerName", user).apply()
     }
 
+    // Uninstall drops everything kept under the name, so a new container that reuses it
+    // starts clean. A new per-container key belongs here too.
+    fun forgetContainer(containerName: String) {
+        prefs.edit()
+            .remove("${KEY_CONTAINER_LOG_PREFIX}$containerName")
+            .remove("${KEY_CONTAINER_OS_INFO_PREFIX}$containerName")
+            .remove("terminal_last_user_$containerName")
+            .remove("$KEY_NOTIFY_BRIDGE_LAST_BOOT_ID_PREFIX$containerName")
+            .remove("default_wayland_desktop_$containerName")
+            .remove("anland_keyboard_$containerName")
+            .commit()
+    }
+
     /**
      * Save container OS info to persistent cache (simple delimiter format).
      * Uses pipe (|) as field separator and newline as record separator.

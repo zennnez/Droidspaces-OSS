@@ -232,6 +232,9 @@ class ContainerOperationsViewModel(app: Application) : AndroidViewModel(app) {
             } else {
                 ContainerOSInfoManager.clearCache(container.name, appContext)
                 ContainerUsersManager.clearCache(container.name)
+                ContainerDiskUsageManager.forget(container.rootfsPath)
+                prefsManager.forgetContainer(container.name)
+                containerLogs = containerLogs - container.name
                 onSuccess(string(R.string.container_uninstalled_success, container.name))
                 onRefresh()
             }
