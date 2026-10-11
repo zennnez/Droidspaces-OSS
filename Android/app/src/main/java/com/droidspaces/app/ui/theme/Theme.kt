@@ -34,6 +34,7 @@ private inline fun Color.blend(other: Color, ratio: Float): Color {
  * to mimic Android's Monet-style full-scheme generation.
  */
 private fun darkColorSchemeFor(palette: ThemePalette): ColorScheme {
+    palette.fixedDark?.let { return it }
     val p = palette.primaryDark
     val s = palette.secondaryDark
     val t = palette.tertiaryDark
@@ -82,6 +83,7 @@ private fun darkColorSchemeFor(palette: ThemePalette): ColorScheme {
  * to mimic Android's Monet-style full-scheme generation.
  */
 private fun lightColorSchemeFor(palette: ThemePalette): ColorScheme {
+    palette.fixedLight?.let { return it }
     val p = palette.primaryLight
     val s = palette.secondaryLight
     val t = palette.tertiaryLight

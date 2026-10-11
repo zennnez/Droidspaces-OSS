@@ -44,9 +44,9 @@ fun ColorPaletteSwatch(
     modifier: Modifier = Modifier,
     swatchSize: Float = 52f
 ) {
-    val primary = if (isDarkTheme) palette.primaryDark else palette.primaryLight
-    val secondary = if (isDarkTheme) palette.secondaryDark else palette.secondaryLight
-    val tertiary = if (isDarkTheme) palette.tertiaryDark else palette.tertiaryLight
+    val (primary, secondary, tertiary) = palette.swatch
+        ?: if (isDarkTheme) listOf(palette.primaryDark, palette.secondaryDark, palette.tertiaryDark)
+        else listOf(palette.primaryLight, palette.secondaryLight, palette.tertiaryLight)
 
     // Animate selection ring and checkmark with spring physics
     val selectionProgress by animateFloatAsState(

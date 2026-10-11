@@ -1,6 +1,8 @@
 package com.droidspaces.app.ui.theme
 
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 
@@ -24,7 +26,9 @@ val ColorScheme.onWarningContainer: Color
  * "Wallpaper & style" palette picker.
  *
  * Each palette defines primary, secondary, and tertiary colors for both
- * light and dark modes.
+ * light and dark modes. A palette taken from a real Material You scheme also
+ * carries that whole scheme in [fixedLight] and [fixedDark], used as is instead
+ * of the blended surfaces the others get, and its own [swatch] colours.
  */
 enum class ThemePalette(
     val displayName: String,
@@ -33,8 +37,63 @@ enum class ThemePalette(
     val tertiaryLight: Color,
     val primaryDark: Color,
     val secondaryDark: Color,
-    val tertiaryDark: Color
+    val tertiaryDark: Color,
+    val fixedLight: ColorScheme? = null,
+    val fixedDark: ColorScheme? = null,
+    // Primary, secondary and tertiary for the picker swatch, the same in both modes. A
+    // Material You scheme's own accents are dark tones in light mode and pale in dark, with
+    // muted secondary and tertiary, so as a preview they read flat. These are the scheme's
+    // hues at tone 70 with the chroma pushed up (60, 36, 48 in HCT).
+    val swatch: List<Color>? = null,
 ) {
+    // The Material You scheme One UI built from a gold wallpaper, seed #CFA369 in the
+    // Tonal Spot style, read off the phone's system_* colour resources
+    SAND(
+        displayName = "Sand",
+        swatch = listOf(Color(0xFFEA9A00), Color(0xFFD7A157), Color(0xFF8BB85D)),
+        primaryLight = Color(0xFF805611),   // Gold
+        secondaryLight = Color(0xFF705B40), // Tan
+        tertiaryLight = Color(0xFF52643F),  // Sage
+        primaryDark = Color(0xFFF5BC6F),    // Light Gold
+        secondaryDark = Color(0xFFDEC2A1),  // Light Tan
+        tertiaryDark = Color(0xFFB9CDA0),   // Light Sage
+        fixedLight = lightColorScheme(
+            primary = Color(0xFF805611), onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFFFFDDB4), onPrimaryContainer = Color(0xFF291800),
+            inversePrimary = Color(0xFFF5BC6F),
+            secondary = Color(0xFF705B40), onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFFFBDEBC), onSecondaryContainer = Color(0xFF271904),
+            tertiary = Color(0xFF52643F), onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFD5EABB), onTertiaryContainer = Color(0xFF111F03),
+            background = Color(0xFFFFF8F4), onBackground = Color(0xFF211B13),
+            surface = Color(0xFFFFF8F4), onSurface = Color(0xFF211B13),
+            surfaceVariant = Color(0xFFF0E0D0), onSurfaceVariant = Color(0xFF4F4539),
+            inverseSurface = Color(0xFF362F27), inverseOnSurface = Color(0xFFFCEFE2),
+            outline = Color(0xFF817567), outlineVariant = Color(0xFFD3C4B4),
+            surfaceBright = Color(0xFFFFF8F4), surfaceDim = Color(0xFFE5D8CC),
+            surfaceContainerLowest = Color(0xFFFFFFFF), surfaceContainerLow = Color(0xFFFFF1E5),
+            surfaceContainer = Color(0xFFF9ECDF), surfaceContainerHigh = Color(0xFFF3E6DA),
+            surfaceContainerHighest = Color(0xFFEDE0D4),
+        ),
+        fixedDark = darkColorScheme(
+            primary = Color(0xFFF5BC6F), onPrimary = Color(0xFF452B00),
+            primaryContainer = Color(0xFF633F00), onPrimaryContainer = Color(0xFFFFDDB4),
+            inversePrimary = Color(0xFF805611),
+            secondary = Color(0xFFDEC2A1), onSecondary = Color(0xFF3E2D16),
+            secondaryContainer = Color(0xFF56432B), onSecondaryContainer = Color(0xFFFBDEBC),
+            tertiary = Color(0xFFB9CDA0), onTertiary = Color(0xFF253515),
+            tertiaryContainer = Color(0xFF3B4C29), onTertiaryContainer = Color(0xFFD5EABB),
+            background = Color(0xFF18120B), onBackground = Color(0xFFEDE0D4),
+            surface = Color(0xFF18120B), onSurface = Color(0xFFEDE0D4),
+            surfaceVariant = Color(0xFF4F4539), onSurfaceVariant = Color(0xFFD3C4B4),
+            inverseSurface = Color(0xFFEDE0D4), inverseOnSurface = Color(0xFF362F27),
+            outline = Color(0xFF9C8F80), outlineVariant = Color(0xFF4F4539),
+            surfaceBright = Color(0xFF3F3830), surfaceDim = Color(0xFF18120B),
+            surfaceContainerLowest = Color(0xFF130D07), surfaceContainerLow = Color(0xFF211B13),
+            surfaceContainer = Color(0xFF251F17), surfaceContainerHigh = Color(0xFF302921),
+            surfaceContainerHighest = Color(0xFF3B342B),
+        ),
+    ),
     CATPPUCCIN(
         displayName = "Catppuccin",
         primaryLight = Color(0xFF8AADF4),   // Blue
