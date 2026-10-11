@@ -101,7 +101,7 @@ fun ContainersScreen(
     containerViewModel: ContainerViewModel,
     expandedContainerName: String?,
     onExpandedContainerNameChange: (String?) -> Unit,
-    emptyStateBottomInset: Dp = 0.dp
+    bottomBarInset: Dp = 0.dp
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -175,18 +175,18 @@ fun ContainersScreen(
         // Show root unavailable state first, then backend unavailable, then content
         when {
             !isRootAvailable -> {
-                RootUnavailableState(modifier = Modifier.padding(bottom = emptyStateBottomInset))
+                RootUnavailableState(modifier = Modifier.padding(bottom = bottomBarInset))
             }
             !isBackendAvailable -> {
-                ErrorState(modifier = Modifier.padding(bottom = emptyStateBottomInset))
+                ErrorState(modifier = Modifier.padding(bottom = bottomBarInset))
             }
             !isKernelSupported -> {
-                KernelUnsupportedState(modifier = Modifier.padding(bottom = emptyStateBottomInset))
+                KernelUnsupportedState(modifier = Modifier.padding(bottom = bottomBarInset))
             }
             entries.isEmpty() -> {
                 if (containerViewModel.isRefreshing) {
                     Box(
-                        modifier = Modifier.fillMaxSize().padding(bottom = emptyStateBottomInset),
+                        modifier = Modifier.fillMaxSize().padding(bottom = bottomBarInset),
                         contentAlignment = Alignment.Center
                     ) {
                         LoadingIndicator(size = LoadingSize.Large)
@@ -198,7 +198,7 @@ fun ContainersScreen(
                         description = context.getString(R.string.install_container_description),
                         // Reserve the floating tab bar's space so the centered
                         // content sits in the visible region, not behind the bar.
-                        modifier = Modifier.padding(bottom = emptyStateBottomInset)
+                        modifier = Modifier.padding(bottom = bottomBarInset)
                     )
                 }
             }
@@ -216,8 +216,8 @@ fun ContainersScreen(
                             }
                         )
                         .padding(horizontal = 16.dp),
-                    // Each card carries its own 16dp gap (AnimatedListEntry), hence 104 + 16.
-                    contentPadding = PaddingValues(top = 8.dp, bottom = 104.dp), // Clear floating tab bar
+                    // Each card carries its own 16dp gap (AnimatedListEntry) on top of this
+                    contentPadding = PaddingValues(top = 8.dp, bottom = bottomBarInset + 16.dp),
                 ) {
                     items(entries, key = { it.key }) { entry ->
                         val container = entry.item
@@ -332,8 +332,7 @@ fun ContainersScreen(
             FloatingActionButtonMenu(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .navigationBarsPadding()
-                    .padding(end = 24.dp, bottom = 88.dp), // Clear floating tab bar
+                    .padding(end = 24.dp, bottom = bottomBarInset + 16.dp),
                 expanded = fabMenuExpanded,
                 button = {
                     ToggleFloatingActionButton(
@@ -402,7 +401,7 @@ fun ContainersScreen(
         // SNACKBAR LAYER (Highest Z-index in the root Box)
         DsSnackbarHost(
             hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 100.dp)
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBarInset + 16.dp)
         )
 
         // Log viewer dialog - console stays open, user must close manually

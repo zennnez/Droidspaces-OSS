@@ -136,8 +136,9 @@ wants 12 or 16.
 | Icon to its label, chip to chip | 8 |
 | Tight metadata rows | 4 |
 
-Screens that sit under the floating tab bar add `bottom = 120.dp` to their content padding so the
-last card clears it.
+Screens that sit under the floating tab bar get its measured height, system nav inset included,
+as `bottomBarInset`, and add `bottomBarInset + 16.dp` to their content padding so the last card
+clears it. Never a fixed dp: three-button nav's 48dp inset makes the bar much taller than gesture nav does.
 
 ### Card headers line up across tabs
 
@@ -201,8 +202,9 @@ own rule below.
 ## Floating action button
 
 A screen has at most one FAB. It sits bottom right in the screen's root `Box`, with
-`navigationBarsPadding()` and `padding(end = 24.dp, bottom = 88.dp)` so it clears the floating
-tab bar.
+`padding(end = 24.dp, bottom = bottomBarInset + 16.dp)` so it clears the floating tab bar.
+Snackbars on the tab screens sit at the same `bottomBarInset + 16.dp` and may cover the FAB while
+they show.
 
 More than one action behind a FAB is a Material 3 Expressive `FloatingActionButtonMenu` with a
 `ToggleFloatingActionButton` as its button, never a small FAB stacked on an extended one. The

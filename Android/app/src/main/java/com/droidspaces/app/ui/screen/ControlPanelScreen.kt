@@ -51,7 +51,7 @@ fun ControlPanelScreen(
     containerViewModel: ContainerViewModel,
     onNavigateToContainerDetails: (String) -> Unit = {},
     onNavigateToTerminal: (String) -> Unit = {},
-    emptyStateBottomInset: Dp = 0.dp,
+    bottomBarInset: Dp = 0.dp,
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -102,13 +102,13 @@ fun ControlPanelScreen(
         // Using when instead of early return to prevent UI glitches during recomposition
         when {
             !isRootAvailable -> {
-                RootUnavailableState(modifier = Modifier.padding(bottom = emptyStateBottomInset))
+                RootUnavailableState(modifier = Modifier.padding(bottom = bottomBarInset))
             }
             !isBackendAvailable -> {
-                ErrorState(modifier = Modifier.padding(bottom = emptyStateBottomInset))
+                ErrorState(modifier = Modifier.padding(bottom = bottomBarInset))
             }
             !isKernelSupported -> {
-                KernelUnsupportedState(modifier = Modifier.padding(bottom = emptyStateBottomInset))
+                KernelUnsupportedState(modifier = Modifier.padding(bottom = bottomBarInset))
             }
             else -> {
                 if (entries.isEmpty()) {
@@ -118,7 +118,7 @@ fun ControlPanelScreen(
                         description = context.getString(R.string.start_container_first),
                         // Reserve the floating tab bar's space so the centered
                         // content sits in the visible region, not behind the bar.
-                        modifier = Modifier.padding(bottom = emptyStateBottomInset)
+                        modifier = Modifier.padding(bottom = bottomBarInset)
                     )
                 } else {
                     Column(
@@ -126,8 +126,8 @@ fun ControlPanelScreen(
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState())
                             .padding(horizontal = 16.dp)
-                            // Each card carries its own 16dp gap (AnimatedListEntry), hence 104 + 16.
-                            .padding(top = 8.dp, bottom = 104.dp), // Clear floating tab bar
+                            // Each card carries its own 16dp gap (AnimatedListEntry) on top of this
+                            .padding(top = 8.dp, bottom = bottomBarInset + 16.dp),
                     ) {
                         entries.forEach { entry ->
                             val container = entry.item
@@ -185,7 +185,7 @@ fun ControlPanelScreen(
         // Snackbar host (always present)
         DsSnackbarHost(
             hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBarInset + 16.dp)
         )
     }
 }

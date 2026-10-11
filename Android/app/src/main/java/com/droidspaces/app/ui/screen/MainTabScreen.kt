@@ -317,9 +317,10 @@ fun MainTabScreen(
         contentWindowInsets = WindowInsets(0)
     ) { innerPadding ->
         val density = LocalDensity.current
-        // Measured height of the floating bottom bar (incl. system nav inset).
-        // Reserved as bottom space for centered empty states so they sit in the
-        // visible region above the bar instead of behind it.
+        // Measured height of the floating bottom bar, system nav inset included.
+        // The tabs draw under it, so anything pinned to their bottom edge offsets
+        // by this. A fixed dp guess fits gesture nav and lands behind the bar on
+        // three-button nav, whose 48dp inset is much taller.
         var bottomBarHeight by remember { mutableStateOf(0.dp) }
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             HorizontalPager(
@@ -347,7 +348,8 @@ fun MainTabScreen(
                             },
                             containerCount = containerCount,
                             runningCount = runningCount,
-                            onRefresh = { performRefresh(TabItem.Home) }
+                            onRefresh = { performRefresh(TabItem.Home) },
+                            bottomBarInset = bottomBarHeight
                         )
                     }
 
@@ -364,7 +366,7 @@ fun MainTabScreen(
                             onRefresh = { performRefresh(TabItem.Containers) },
                             expandedContainerName = expandedContainerName,
                             onExpandedContainerNameChange = { expandedContainerName = it },
-                            emptyStateBottomInset = bottomBarHeight
+                            bottomBarInset = bottomBarHeight
                         )
                     }
 
@@ -377,7 +379,7 @@ fun MainTabScreen(
                             onRefresh = { performRefresh(TabItem.ControlPanel) },
                             onNavigateToContainerDetails = onNavigateToContainerDetails,
                             onNavigateToTerminal = onNavigateToTerminal,
-                            emptyStateBottomInset = bottomBarHeight
+                            bottomBarInset = bottomBarHeight
                         )
                     }
                 }
@@ -416,7 +418,8 @@ private fun HomeTabContent(
     onNavigateToControlPanel: () -> Unit,
     containerCount: Int,
     runningCount: Int,
-    onRefresh: suspend () -> Unit
+    onRefresh: suspend () -> Unit,
+    bottomBarInset: Dp = 0.dp
 ) {
     val context = LocalContext.current
     // Track refresh trigger for SystemInfoCard
@@ -438,7 +441,7 @@ private fun HomeTabContent(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
-                .padding(top = 8.dp, bottom = 120.dp) // Large bottom padding for floating bar + FAB
+                .padding(top = 8.dp, bottom = bottomBarInset + 16.dp)
         ) {
             DroidspacesStatusCard(
                 status = droidspacesStatus,
@@ -597,7 +600,7 @@ private fun ContainersTabContent(
     onRefresh: suspend () -> Unit,
     expandedContainerName: String?,
     onExpandedContainerNameChange: (String?) -> Unit,
-    emptyStateBottomInset: Dp = 0.dp
+    bottomBarInset: Dp = 0.dp
 ) {
     PullToRefreshWrapper(onRefresh = { onRefresh() }) {
         ContainersScreen(
@@ -611,7 +614,7 @@ private fun ContainersTabContent(
             containerViewModel = containerViewModel,
             expandedContainerName = expandedContainerName,
             onExpandedContainerNameChange = onExpandedContainerNameChange,
-            emptyStateBottomInset = emptyStateBottomInset
+            bottomBarInset = bottomBarInset
         )
     }
 }
@@ -625,7 +628,7 @@ private fun ControlPanelTabContent(
     onRefresh: suspend () -> Unit,
     onNavigateToContainerDetails: (String) -> Unit,
     onNavigateToTerminal: (String) -> Unit,
-    emptyStateBottomInset: Dp = 0.dp
+    bottomBarInset: Dp = 0.dp
 ) {
     var refreshTrigger by remember { mutableStateOf(0) }
 
@@ -640,7 +643,7 @@ private fun ControlPanelTabContent(
             containerViewModel = containerViewModel,
             onNavigateToContainerDetails = onNavigateToContainerDetails,
             onNavigateToTerminal = onNavigateToTerminal,
-            emptyStateBottomInset = emptyStateBottomInset
+            bottomBarInset = bottomBarInset
         )
     }
 }
