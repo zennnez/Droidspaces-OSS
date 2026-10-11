@@ -89,7 +89,17 @@ void print_usage(void) {
       "      --virgl-flags=\"FLAGS\"   Extra flags passed to "
       "virgl_test_server_android\n"
       "      --pulse-audio         Configure PulseAudio sound server "
-      "support\n\n");
+      "support\n"
+      "      --anland              Embed the anland display daemon "
+      "(Android)\n"
+      "      --clipboard-bridge    Bridge Android <-> Linux clipboard "
+      "(requires -X/--x11)\n"
+      "      --clipboard-sync-interval=MS\n"
+      "                            Poll interval in ms (default 1000, min "
+      "250)\n"
+      "      --clipboard-max-size=BYTES\n"
+      "                            Max clipboard payload synced (default "
+      "262144)\n\n");
 
   printf(
       C_BOLD
@@ -380,6 +390,10 @@ static struct option long_options[] = {
     {"virgl", no_argument, 0, 270},
     {"virgl-flags", required_argument, 0, 272},
     {"pulse-audio", no_argument, 0, 273},
+    {"anland", no_argument, 0, 283},
+    {"clipboard-bridge", no_argument, 0, 284},
+    {"clipboard-sync-interval", required_argument, 0, 285},
+    {"clipboard-max-size", required_argument, 0, 286},
     {"gateway", required_argument, 0, 274},
     {"gateway-container", required_argument, 0, 274},
     {"gateway-net", required_argument, 0, 275},
@@ -480,6 +494,33 @@ int ds_apply_cli_overrides(int argc, char **argv, struct ds_config *cfg,
     case 273:
       cfg->pulseaudio = 1;
       break;
+    case 283:
+      cfg->anland = 1;
+      break;
+    case 284:
+      cfg->clipboard_bridge = 1;
+      break;
+    case 285: {
+      char *end;
+      errno = 0;
+      long v = strtol(optarg, &end, 10);
+      if (errno || end == optarg || *end != '\0' || v < 100 || v > 60000) {
+        ds_error("--clipboard-sync-interval: expected 100..60000 ms, got: %s",
+                 optarg);
+        return -1;
+      }
+      cfg->clipboard_sync_interval_ms = (int)v;
+      break;
+    }
+    case 286: {
+      long long v = ds_parse_size(optarg);
+      if (v <= 0 || v > 64LL * 1024 * 1024) {
+        ds_error("--clipboard-max-size: expected 1..64M, got: %s", optarg);
+        return -1;
+      }
+      cfg->clipboard_max_size_bytes = v;
+      break;
+    }
     case 274:
       safe_strncpy(cfg->gateway_container, optarg,
                    sizeof(cfg->gateway_container));

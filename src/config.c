@@ -326,6 +326,14 @@ int ds_config_load(const char *config_path, struct ds_config *cfg) {
       cfg->virgl_extra_flags = val[0] ? strdup(val) : NULL;
     } else if (strcmp(key, "enable_pulseaudio") == 0) {
       cfg->pulseaudio = parse_bool(val);
+    } else if (strcmp(key, "enable_anland") == 0) {
+      cfg->anland = parse_bool(val);
+    } else if (strcmp(key, "enable_clipboard_bridge") == 0) {
+      cfg->clipboard_bridge = parse_bool(val);
+    } else if (strcmp(key, "clipboard_sync_interval") == 0) {
+      cfg->clipboard_sync_interval_ms = atoi(val);
+    } else if (strcmp(key, "clipboard_max_size") == 0) {
+      cfg->clipboard_max_size_bytes = atol(val);
     } else if (strcmp(key, "selinux_permissive") == 0) {
       cfg->selinux_permissive = parse_bool(val);
     } else if (strcmp(key, "allow_sandboxing") == 0 ||
@@ -693,6 +701,13 @@ static void ds_config_serialize_known(FILE *f, struct ds_config *cfg) {
     if (cfg->virgl_extra_flags)
       fprintf(f, "virgl_extra_flags=%s\n", cfg->virgl_extra_flags);
     fprintf(f, "enable_pulseaudio=%d\n", cfg->pulseaudio);
+    fprintf(f, "enable_anland=%d\n", cfg->anland);
+    fprintf(f, "enable_clipboard_bridge=%d\n", cfg->clipboard_bridge);
+    if (cfg->clipboard_sync_interval_ms > 0)
+      fprintf(f, "clipboard_sync_interval=%d\n",
+              cfg->clipboard_sync_interval_ms);
+    if (cfg->clipboard_max_size_bytes > 0)
+      fprintf(f, "clipboard_max_size=%ld\n", cfg->clipboard_max_size_bytes);
   }
   fprintf(f, "enable_hw_access=%d\n", cfg->hw_access);
   fprintf(f, "enable_gpu_mode=%d\n", cfg->gpu_mode);

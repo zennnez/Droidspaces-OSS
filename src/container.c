@@ -247,6 +247,8 @@ void cleanup_container_resources(struct ds_config *cfg, pid_t pid,
     ds_x11_daemon_stop(cfg);
     ds_virgl_daemon_stop(cfg);
     ds_pulse_daemon_stop(cfg);
+    ds_clipboard_daemon_stop(cfg);
+    ds_anland_daemon_stop(cfg);
     if (count_running_containers(NULL, 0) == 0) {
       android_optimizations(0);
     }
@@ -579,6 +581,16 @@ static int start_rootfs_locked(struct ds_config *cfg, int *lock_fd,
 
   if (is_android() && cfg->pulseaudio) {
     ds_pulse_daemon_start(cfg);
+  }
+
+  /* Clipboard bridge: started after display is up */
+  if (is_android() && cfg->clipboard_bridge) {
+    ds_clipboard_daemon_start(cfg);
+  }
+
+  /* anland display daemon: generate host socket and start broker before fork */
+  if (is_android() && cfg->anland) {
+    ds_anland_daemon_start(cfg);
   }
 
   /* 3. Early pre-flight for volatile mode (before any host changes) */
@@ -1398,30 +1410,7 @@ int enter_rootfs(struct ds_config *cfg, const char *user) {
   return exit_status(st);
 }
 
-/* Append arg to buf as a single-quoted shell word, space-separated from any
- * prior content unless first.  Embedded single quotes use the '\'' idiom.
- * Writes at most size-1 chars and always NUL-terminates; returns the new
- * offset.  Preserves argv word boundaries across su -c's shell. */
-static size_t shell_quote_append(char *buf, size_t off, size_t size,
-                                 const char *arg, int first) {
-  if (!first && off < size - 1)
-    buf[off++] = ' ';
-  if (off < size - 1)
-    buf[off++] = '\'';
-  for (const char *p = arg; *p; p++) {
-    if (*p == '\'') {
-      const char *esc = "'\\''"; /* close quote, escaped quote, reopen quote */
-      for (const char *e = esc; *e && off < size - 1; e++)
-        buf[off++] = *e;
-    } else if (off < size - 1) {
-      buf[off++] = *p;
-    }
-  }
-  if (off < size - 1)
-    buf[off++] = '\'';
-  buf[off] = '\0';
-  return off;
-}
+
 
 int run_in_rootfs(struct ds_config *cfg, char **argv, const char *as_user) {
   pid_t pid = 0;
@@ -1721,6 +1710,8 @@ int show_info(struct ds_config *cfg, int trust_cfg_pid) {
       if (cfg->virgl_extra_flags)
         ds_json_str("virgl_flags", cfg->virgl_extra_flags, &first);
       ds_json_int("pulseaudio", cfg->pulseaudio, &first);
+      ds_json_int("anland", cfg->anland, &first);
+      ds_json_int("clipboard_bridge", cfg->clipboard_bridge, &first);
     }
 
     if (access("/sys/fs/selinux/enforce", R_OK) == 0)
@@ -1923,6 +1914,18 @@ int show_info(struct ds_config *cfg, int trust_cfg_pid) {
     /* 9. PulseAudio */
     if (is_android() && cfg->pulseaudio) {
       printf("  PulseAudio: enabled\n");
+      feat_count++;
+    }
+
+    /* 9b. Anland */
+    if (is_android() && cfg->anland) {
+      printf("  Anland: enabled\n");
+      feat_count++;
+    }
+
+    /* 9c. Clipboard Bridge */
+    if (is_android() && cfg->clipboard_bridge) {
+      printf("  Clipboard bridge: enabled\n");
       feat_count++;
     }
 

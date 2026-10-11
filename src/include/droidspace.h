@@ -161,6 +161,19 @@
 #define TX11_PACTL_BIN TX11_PREFIX "/bin/pactl"
 #define TX11_PULSE_DEFAULT_SINK "AAudio_sink"
 
+/* Clipboard bridge (Android only). No new socket/bind-mount is needed: the
+ * daemon runs as the Termux user and talks to the SAME Termux:X11 display
+ * that's already bridged into the container (see x11.c), plus Termux:API's
+ * termux-clipboard-get/-set for the Android side. */
+#define TX11_XCLIP_BIN TX11_PREFIX "/bin/xclip"
+#define TX11_CLIPBOARD_GET_BIN TX11_PREFIX "/bin/termux-clipboard-get"
+#define TX11_CLIPBOARD_SET_BIN TX11_PREFIX "/bin/termux-clipboard-set"
+#define DS_CLIPBOARD_DEFAULT_SYNC_INTERVAL_MS 1000
+#define DS_CLIPBOARD_MIN_SYNC_INTERVAL_MS 250
+#define DS_CLIPBOARD_DEFAULT_MAX_SIZE_BYTES (256 * 1024)
+#define DS_CLIPBOARD_STATUS_FILE "clip.status"
+#define DS_CLIPBOARD_PID_FILE "clip.ppid"
+
 /* File Extensions */
 #define DS_EXT_PID ".pid"
 #define DS_EXT_XPID ".xpid"
@@ -386,6 +399,10 @@ struct ds_config {
   int virgl;               /* --virgl (Android only) */
   char *virgl_extra_flags; /* --virgl-flags "..." (heap, NULL if unset) */
   int pulseaudio;          /* --pulse-audio (Android only) */
+  int anland;              /* --anland: embed anland display daemon (Android) */
+  int clipboard_bridge;    /* --clipboard-bridge (Android only, requires x11) */
+  int clipboard_sync_interval_ms; /* --clipboard-sync-interval= (default 1000, min 250) */
+  long clipboard_max_size_bytes;  /* --clipboard-max-size= (default 256KiB) */
   int volatile_mode;       /* --volatile */
   int disable_ipv6;        /* --disable-ipv6 */
   int android_storage;     /* --enable-android-storage */
@@ -406,6 +423,9 @@ struct ds_config {
   pid_t x11_pid;                  /* PID of the Termux-X11 server process */
   pid_t virgl_pid;                /* PID of the VirGL server process */
   pid_t pulse_pid;                /* PID of the PulseAudio daemon process */
+  pid_t clipboard_pid;            /* PID of the clipboard bridge daemon process */
+  pid_t anland_pid;               /* PID of the anland display daemon process */
+  char anland_sock[PATH_MAX];     /* generated host socket for the anland daemon */
   int is_img_mount;               /* 1 if rootfs was loop-mounted from .img */
   char img_mount_point[PATH_MAX]; /* where the .img was mounted */
   ds_init_type_t init_type;       /* detected container PID 1 init family */
@@ -746,6 +766,18 @@ int ds_setup_virgl_socket(struct ds_config *cfg);
 int ds_pulse_daemon_start(struct ds_config *cfg);
 void ds_pulse_daemon_stop(struct ds_config *cfg);
 int ds_setup_pulse_socket(struct ds_config *cfg);
+
+/* anland/anland.c */
+
+int ds_anland_daemon_start(struct ds_config *cfg);
+void ds_anland_daemon_stop(struct ds_config *cfg);
+int ds_setup_anland_socket(struct ds_config *cfg);
+
+/* android/clipboard.c */
+
+int ds_clipboard_daemon_start(struct ds_config *cfg);
+void ds_clipboard_daemon_stop(struct ds_config *cfg);
+int check_clipboard_needs(void);
 
 /* network.c */
 

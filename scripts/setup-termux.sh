@@ -40,6 +40,12 @@ DEBIAN_FRONTEND=noninteractive pkg install -y -o Dpkg::Options::="--force-confol
 log "Installing libandroid-stub (OpenSL ES HAL fix)..."
 DEBIAN_FRONTEND=noninteractive pkg install -y -o Dpkg::Options::="--force-confold" libandroid-stub
 
+log "Installing xclip and Termux:API (optional, for the clipboard bridge)..."
+DEBIAN_FRONTEND=noninteractive pkg install -y -o Dpkg::Options::="--force-confold" xclip termux-api
+log "Note: the clipboard bridge also needs the Termux:API app installed"
+log "(F-Droid or https://github.com/termux/termux-api/releases), since the"
+log "termux-api package alone only provides the client-side scripts."
+
 log "Patching $DEFAULT_PA..."
 
 if [ ! -f "$DEFAULT_PA" ]; then

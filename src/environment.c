@@ -85,6 +85,20 @@ void ds_env_boot_setup(struct ds_config *cfg) {
     setenv("GALLIUM_DRIVER", "virpipe", 1);
   if (is_android() && cfg->pulseaudio)
     setenv("PULSE_SERVER", "unix:" DS_PULSE_SOCKET, 1);
+  if (is_android() && cfg->clipboard_bridge && cfg->x11) {
+    setenv("CLIPBOARD_BRIDGE", "true", 1);
+    char interval_buf[16], size_buf[24];
+    snprintf(interval_buf, sizeof(interval_buf), "%d",
+             cfg->clipboard_sync_interval_ms > 0
+                 ? cfg->clipboard_sync_interval_ms
+                 : DS_CLIPBOARD_DEFAULT_SYNC_INTERVAL_MS);
+    snprintf(size_buf, sizeof(size_buf), "%ld",
+             cfg->clipboard_max_size_bytes > 0
+                 ? cfg->clipboard_max_size_bytes
+                 : DS_CLIPBOARD_DEFAULT_MAX_SIZE_BYTES);
+    setenv("CLIPBOARD_SYNC_INTERVAL", interval_buf, 1);
+    setenv("CLIPBOARD_MAX_SIZE", size_buf, 1);
+  }
 }
 
 void ds_env_save(const char *path, struct ds_config *cfg) {
@@ -120,6 +134,17 @@ void ds_env_save(const char *path, struct ds_config *cfg) {
     fprintf(f, "export GALLIUM_DRIVER='virpipe'\n");
   if (is_android() && cfg->pulseaudio)
     fprintf(f, "export PULSE_SERVER='unix:" DS_PULSE_SOCKET "'\n");
+  if (is_android() && cfg->clipboard_bridge && cfg->x11) {
+    fprintf(f, "export CLIPBOARD_BRIDGE='true'\n");
+    fprintf(f, "export CLIPBOARD_SYNC_INTERVAL='%d'\n",
+            cfg->clipboard_sync_interval_ms > 0
+                ? cfg->clipboard_sync_interval_ms
+                : DS_CLIPBOARD_DEFAULT_SYNC_INTERVAL_MS);
+    fprintf(f, "export CLIPBOARD_MAX_SIZE='%ld'\n",
+            cfg->clipboard_max_size_bytes > 0
+                ? cfg->clipboard_max_size_bytes
+                : DS_CLIPBOARD_DEFAULT_MAX_SIZE_BYTES);
+  }
 
   fclose(f);
   chmod(path, 0755);
