@@ -280,8 +280,12 @@ fun ContainerTerminalScreen(
     if (showUserPicker) {
         UserPickerDialog(
             users = availableUsers,
+            // A user deleted since it was last opened falls back to root
+            initialUser = PreferencesManager.getInstance(context).getLastTerminalUser(containerName)
+                ?.takeIf { it in availableUsers } ?: "root",
             onConfirm = { user ->
                 showUserPicker = false
+                PreferencesManager.getInstance(context).setLastTerminalUser(containerName, user)
                 addTab(user)
             },
             onDismiss = {
@@ -671,11 +675,12 @@ private fun KeyboardToggleButton(
 @Composable
 private fun UserPickerDialog(
     users: List<String>,
+    initialUser: String,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
-    var selected by remember { mutableStateOf(users.firstOrNull() ?: "root") }
+    var selected by remember { mutableStateOf(initialUser) }
 
     DsDialog(
         onDismiss = onDismiss,

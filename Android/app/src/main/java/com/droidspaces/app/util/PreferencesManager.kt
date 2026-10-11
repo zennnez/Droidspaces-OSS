@@ -406,6 +406,14 @@ class PreferencesManager private constructor(context: Context) {
         prefs.edit().remove("${KEY_CONTAINER_LOG_PREFIX}$containerName").commit()
     }
 
+    // Preselected in the terminal's user picker, per container
+    fun getLastTerminalUser(containerName: String): String? =
+        prefs.getString("terminal_last_user_$containerName", null)
+
+    fun setLastTerminalUser(containerName: String, user: String) {
+        prefs.edit().putString("terminal_last_user_$containerName", user).apply()
+    }
+
     /**
      * Save container OS info to persistent cache (simple delimiter format).
      * Uses pipe (|) as field separator and newline as record separator.
