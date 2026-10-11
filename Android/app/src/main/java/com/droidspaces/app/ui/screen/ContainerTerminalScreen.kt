@@ -61,7 +61,12 @@ import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 import java.lang.ref.WeakReference
 import java.util.UUID
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.ui.platform.LocalDensity
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.core.content.res.ResourcesCompat
 import com.droidspaces.app.R
@@ -109,6 +114,9 @@ fun ContainerTerminalScreen(
     val scope = rememberCoroutineScope()
     var availableUsers by remember { mutableStateOf(listOf("root")) }
     var fetchingUsers by remember { mutableStateOf(false) }
+    // Read inside snapshotFlow only, so the IME animation does not recompose the screen
+    val ime = WindowInsets.ime
+    val density = LocalDensity.current
 
     val tabs = remember { mutableStateListOf<TerminalTab>() }
     var activeTabId by remember { mutableStateOf("") }
@@ -171,7 +179,20 @@ fun ContainerTerminalScreen(
         try {
             val users = ContainerUsersManager.getUsers(containerName, useCache = false)
             availableUsers = listOf("root") + users
-            if (users.isEmpty()) addTab("root") else showUserPicker = true
+            if (users.isEmpty()) {
+                addTab("root")
+                return
+            }
+            // The picker is its own window. Opened over the terminal's keyboard it sizes itself
+            // above the IME, takes focus, the IME drops, and it jumps to full size on screen.
+            // Put the keyboard away first and open it once the inset has settled at zero.
+            if (ime.getBottom(density) > 0) {
+                activity?.window?.let {
+                    WindowCompat.getInsetsController(it, it.decorView).hide(WindowInsetsCompat.Type.ime())
+                }
+                withTimeoutOrNull(1000) { snapshotFlow { ime.getBottom(density) }.first { it == 0 } }
+            }
+            showUserPicker = true
         } finally {
             fetchingUsers = false
         }
