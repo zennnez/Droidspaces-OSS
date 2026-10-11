@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -16,6 +18,7 @@
 
     <!-- Package visibility: the config form greys out the Termux-backed toggles when these are missing -->
     <queries>
+        <package android:name="com.anland.consumer" />
         <package android:name="com.termux" />
         <package android:name="com.termux.x11" />
     </queries>
@@ -69,10 +72,39 @@
                 android:value="Terminal sessions for Droidspaces containers" />
         </service>
 
+        <activity
+            android:name=".ui.screen.ShareImportActivity"
+            android:exported="true"
+            android:label="Open in Droidspaces"
+            android:theme="@style/AppTheme"
+            android:excludeFromRecents="true"
+            android:taskAffinity="">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".service.RootfsDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_bridge_paths" />
+        </provider>
 
     </application>
 

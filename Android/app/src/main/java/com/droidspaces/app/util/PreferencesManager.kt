@@ -179,6 +179,18 @@ class PreferencesManager private constructor(context: Context) {
             prefs.edit().putBoolean(KEY_TERMINAL_CONFIRM_CLOSE, value).apply()
         }
 
+    var discoveryEnabled: Boolean
+        get() = prefs.getBoolean(KEY_DISCOVERY_ENABLED, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_DISCOVERY_ENABLED, value).apply()
+        }
+
+    var discoveryHttpPort: Int
+        get() = prefs.getInt(KEY_DISCOVERY_HTTP_PORT, 8073)
+        set(value) {
+            prefs.edit().putInt(KEY_DISCOVERY_HTTP_PORT, value).apply()
+        }
+
     // On by default so nothing changes on upgrade. Off hands a tap to whatever
     // runs in the terminal, which is what an editor wants, and the keyboard
     // comes from the button on the terminal instead.
@@ -480,6 +492,8 @@ class PreferencesManager private constructor(context: Context) {
         private const val KEY_TERMINAL_CONFIRM_CLOSE = Constants.KEY_TERMINAL_CONFIRM_CLOSE
         private const val KEY_TERMINAL_TAP_KEYBOARD = Constants.KEY_TERMINAL_TAP_KEYBOARD
         private const val KEY_TERMINAL_KEYBOARD_LEFT = Constants.KEY_TERMINAL_KEYBOARD_LEFT
+        private const val KEY_DISCOVERY_ENABLED = Constants.KEY_DISCOVERY_ENABLED
+        private const val KEY_DISCOVERY_HTTP_PORT = Constants.KEY_DISCOVERY_HTTP_PORT
         const val KEY_THEME_PALETTE = Constants.KEY_THEME_PALETTE
         const val KEY_DAEMON_MODE_ENABLED = Constants.KEY_DAEMON_MODE_ENABLED
         const val KEY_SYMLINK_ENABLED = Constants.KEY_SYMLINK_ENABLED

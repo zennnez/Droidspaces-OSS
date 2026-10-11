@@ -49,6 +49,13 @@ import com.droidspaces.app.ui.screen.AnlandGuideScreen
 import com.droidspaces.app.ui.screen.AdrenoTurnipScreen
 import com.droidspaces.app.ui.screen.WirelessScreen
 import com.droidspaces.app.ui.screen.ScrcpyScreen
+import com.droidspaces.app.ui.screen.FileSharingScreen
+import com.droidspaces.app.ui.screen.SshServerScreen
+import com.droidspaces.app.ui.screen.DockerScreen
+import com.droidspaces.app.ui.screen.DockerContainerLogsScreen
+import com.droidspaces.app.ui.screen.TailscaleScreen
+import com.droidspaces.app.ui.screen.CaddyScreen
+import com.droidspaces.app.ui.screen.NetworkDiscoveryScreen
 import com.droidspaces.app.ui.viewmodel.ContainerInstallationViewModel
 import com.droidspaces.app.ui.viewmodel.ContainerViewModel
 import com.droidspaces.app.util.ContainerManager
@@ -152,6 +159,26 @@ sealed class Screen(val route: String) {
     }
     data object TurnipManage : Screen("turnip_manage/{containerName}") {
         fun createRoute(containerName: String) = "turnip_manage/${Uri.encode(containerName)}"
+    }
+    data object NetworkDiscovery : Screen("network_discovery")
+    data object FileSharing : Screen("file_sharing/{containerName}") {
+        fun createRoute(containerName: String) = "file_sharing/${Uri.encode(containerName)}"
+    }
+    data object SshServerManage : Screen("ssh_server_manage/{containerName}") {
+        fun createRoute(containerName: String) = "ssh_server_manage/${Uri.encode(containerName)}"
+    }
+    data object DockerManage : Screen("docker_manage/{containerName}") {
+        fun createRoute(containerName: String) = "docker_manage/${Uri.encode(containerName)}"
+    }
+    data object DockerContainerLogs : Screen("docker_container_logs/{containerName}/{dockerContainerId}/{dockerContainerName}") {
+        fun createRoute(containerName: String, dockerContainerId: String, dockerContainerName: String) =
+            "docker_container_logs/${Uri.encode(containerName)}/${Uri.encode(dockerContainerId)}/${Uri.encode(dockerContainerName)}"
+    }
+    data object TailscaleManage : Screen("tailscale_manage/{containerName}") {
+        fun createRoute(containerName: String) = "tailscale_manage/${Uri.encode(containerName)}"
+    }
+    data object CaddyManage : Screen("caddy_manage/{containerName}") {
+        fun createRoute(containerName: String) = "caddy_manage/${Uri.encode(containerName)}"
     }
 }
 
@@ -626,6 +653,9 @@ fun DroidspacesNavigation(
                 onNavigateToTerminalAppearance = {
                     navController.navigate(Screen.TerminalAppearance.route)
                 },
+                onNavigateToNetworkDiscovery = {
+                    navController.navigate(Screen.NetworkDiscovery.route)
+                },
                 onNavigateToAnlandGuide = {
                     navController.navigate(Screen.AnlandGuide.route)
                 }
@@ -729,6 +759,24 @@ fun DroidspacesNavigation(
                     },
                     onNavigateToAnlandGuide = {
                         navController.navigate(Screen.AnlandGuide.route)
+                    },
+                    onNavigateToFileSharing = {
+                        navController.navigate(Screen.FileSharing.createRoute(containerName))
+                    },
+                    onNavigateToNetworkDiscovery = {
+                        navController.navigate(Screen.NetworkDiscovery.route)
+                    },
+                    onNavigateToSshServer = {
+                        navController.navigate(Screen.SshServerManage.createRoute(containerName))
+                    },
+                    onNavigateToDocker = {
+                        navController.navigate(Screen.DockerManage.createRoute(containerName))
+                    },
+                    onNavigateToTailscale = {
+                        navController.navigate(Screen.TailscaleManage.createRoute(containerName))
+                    },
+                    onNavigateToCaddy = {
+                        navController.navigate(Screen.CaddyManage.createRoute(containerName))
                     },
                     onNavigateToTerminalWithCommand = { cmd: String ->
                         navController.navigate(Screen.Terminal.createRoute(containerName, cmd))
@@ -986,6 +1034,137 @@ fun DroidspacesNavigation(
             AdrenoTurnipScreen(
                 containerName = containerName,
                 onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.NetworkDiscovery.route,
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) {
+            NetworkDiscoveryScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        composable(
+            route = Screen.FileSharing.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            FileSharingScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.SshServerManage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            SshServerScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.DockerManage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            DockerScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() },
+                onViewDockerLogs = { dockerId, dockerName ->
+                    navController.navigate(Screen.DockerContainerLogs.createRoute(containerName, dockerId, dockerName))
+                }
+            )
+        }
+
+        composable(
+            route = Screen.DockerContainerLogs.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType },
+                navArgument("dockerContainerId") { type = NavType.StringType },
+                navArgument("dockerContainerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            val dockerContainerId = backStackEntry.arguments?.getString("dockerContainerId") ?: ""
+            val dockerContainerName = backStackEntry.arguments?.getString("dockerContainerName") ?: ""
+            DockerContainerLogsScreen(
+                containerName = containerName,
+                dockerContainerId = dockerContainerId,
+                dockerContainerName = dockerContainerName,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.TailscaleManage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            TailscaleScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToTerminalWithCommand = { name, cmd ->
+                    navController.navigate(Screen.Terminal.createRoute(name, cmd))
+                }
+            )
+        }
+
+        composable(
+            route = Screen.CaddyManage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition,
+            popEnterTransition = defaultEnterTransition,
+            popExitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            CaddyScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToTerminalWithCommand = { name, cmd ->
+                    navController.navigate(Screen.Terminal.createRoute(name, cmd))
+                }
             )
         }
     }

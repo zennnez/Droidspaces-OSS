@@ -1598,4 +1598,146 @@ EOF
             runningOperationContainer = null
         }
     }
+
+    suspend fun executeInstallTailscale(
+        container: ContainerInfo,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Install Tailscale in container '${container.name}' ===")
+            if (!container.isRunning) {
+                logger.i("Starting container '${container.name}'...")
+                val startCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} start"
+                if (!ContainerOperationExecutor.executeCommand(startCmd, "start", logger)) {
+                    onError("Failed to start container")
+                    return
+                }
+                delay(1000)
+            }
+
+            logger.i("Deploying Tailscale control script...")
+            val scriptContent = appContext.assets.open("tailscale_setup.sh").bufferedReader().use { it.readText() }
+                .replace("\r\n", "\n").replace("\r", "\n")
+            val b64 = android.util.Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val installCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run 'mkdir -p /usr/local/sbin && echo \"$b64\" | base64 -d > /usr/local/sbin/droidspaces-tailscale && " +
+                "chmod 755 /usr/local/sbin/droidspaces-tailscale && /usr/local/sbin/droidspaces-tailscale install'"
+
+            val success = ContainerOperationExecutor.executeCommand(installCmd, "install_tailscale", logger)
+            if (success) {
+                logger.i("Tailscale installed successfully ✓")
+                onSuccess("Tailscale installed successfully")
+            } else {
+                logger.e("Failed to install Tailscale")
+                onError("Failed to install Tailscale")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error installing Tailscale: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeTailscaleUp(
+        container: ContainerInfo,
+        loginServer: String = "",
+        authKey: String = "",
+        hostname: String = "",
+        acceptRoutes: Boolean = true,
+        enableSsh: Boolean = false,
+        exitNode: String = "",
+        advExitNode: Boolean = false,
+        advRoutes: String = "",
+        reset: Boolean = false,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Bring Up Tailscale in container '${container.name}' ===")
+            val scriptContent = appContext.assets.open("tailscale_setup.sh").bufferedReader().use { it.readText() }
+                .replace("\r\n", "\n").replace("\r", "\n")
+            val b64 = android.util.Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val upCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run 'mkdir -p /usr/local/sbin && echo \"$b64\" | base64 -d > /usr/local/sbin/droidspaces-tailscale && " +
+                "chmod 755 /usr/local/sbin/droidspaces-tailscale && " +
+                "/usr/local/sbin/droidspaces-tailscale up ${ContainerCommandBuilder.quote(loginServer)} " +
+                "${ContainerCommandBuilder.quote(authKey)} ${ContainerCommandBuilder.quote(hostname)} " +
+                "${if (acceptRoutes) "1" else "0"} ${if (enableSsh) "1" else "0"} ${ContainerCommandBuilder.quote(exitNode)} " +
+                "${if (advExitNode) "1" else "0"} ${ContainerCommandBuilder.quote(advRoutes)} ${if (reset) "1" else "0"}'"
+
+            val success = ContainerOperationExecutor.executeCommand(upCmd, "tailscale_up", logger)
+            if (success) {
+                logger.i("Tailscale connected successfully ✓")
+                onSuccess("Tailscale connected")
+            } else {
+                logger.w("Tailscale up finished. Check logs or authenticate URL if printed above.")
+                onSuccess("Tailscale up executed")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error running tailscale up: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeTailscaleDown(
+        container: ContainerInfo,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit
+    ) {
+        runningOperationContainer = container.name
+        showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("=== Bring Down Tailscale in container '${container.name}' ===")
+            val downCmd = "${Constants.DROIDSPACES_BINARY_PATH} --name=${ContainerCommandBuilder.quote(container.name)} " +
+                "run '/usr/local/sbin/droidspaces-tailscale down'"
+            val success = ContainerOperationExecutor.executeCommand(downCmd, "tailscale_down", logger)
+            if (success) {
+                logger.i("Tailscale disconnected ✓")
+                onSuccess("Tailscale disconnected")
+            } else {
+                logger.e("Failed to disconnect Tailscale")
+                onError("Failed to disconnect Tailscale")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error disconnecting Tailscale: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
 }

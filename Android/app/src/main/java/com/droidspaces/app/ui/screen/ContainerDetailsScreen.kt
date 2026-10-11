@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import com.droidspaces.app.ui.component.ContainerUsersCard
 import com.droidspaces.app.ui.component.DsSnackbarHost
 import com.droidspaces.app.util.ContainerInfo
+import com.droidspaces.app.util.ContainerManager
 import com.droidspaces.app.util.ContainerOSInfoManager
 import com.droidspaces.app.util.ContainerSystemdManager
 import com.droidspaces.app.util.ContainerProcdManager
@@ -76,6 +77,12 @@ fun ContainerDetailsScreen(
     onNavigateToAnland: () -> Unit = {},
     onNavigateToTurnip: () -> Unit = {},
     onNavigateToAnlandGuide: () -> Unit = {},
+    onNavigateToFileSharing: () -> Unit = {},
+    onNavigateToNetworkDiscovery: () -> Unit = {},
+    onNavigateToSshServer: () -> Unit = {},
+    onNavigateToDocker: () -> Unit = {},
+    onNavigateToTailscale: () -> Unit = {},
+    onNavigateToCaddy: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -294,6 +301,17 @@ fun ContainerDetailsScreen(
                         onOpen = onNavigateToSnapshots
                     )
                 }
+
+                // SSH Server Card
+                if (container.sshEnabled || container.isRunning) {
+                    item(key = "ssh_server_${container.name}") {
+                        SshServerSummaryCard(
+                            container = container,
+                            refreshTrigger = refreshTrigger,
+                            onOpen = onNavigateToSshServer
+                        )
+                    }
+                }
             }
 
             ExtendedFloatingActionButton(
@@ -329,7 +347,12 @@ fun ContainerDetailsScreen(
                 onNavigateToAnland = onNavigateToAnland,
                 onNavigateToTurnip = onNavigateToTurnip,
                 onNavigateToWireless = onNavigateToWireless,
-                onNavigateToScrcpy = onNavigateToScrcpy
+                onNavigateToScrcpy = onNavigateToScrcpy,
+                onNavigateToFileSharing = onNavigateToFileSharing,
+                onNavigateToDocker = onNavigateToDocker,
+                onNavigateToTailscale = onNavigateToTailscale,
+                onNavigateToCaddy = onNavigateToCaddy,
+                onNavigateToNetworkDiscovery = onNavigateToNetworkDiscovery
             )
         }
     }
@@ -937,6 +960,36 @@ private fun SnapshotsSummaryCard(
     )
 }
 
+@Composable
+private fun SshServerSummaryCard(
+    container: ContainerInfo,
+    refreshTrigger: Int,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    var status by remember(container.name) { mutableStateOf<ContainerManager.SshStatus?>(null) }
+
+    LaunchedEffect(container.name, container.isRunning, refreshTrigger) {
+        status = ContainerManager.getSshStatus(context, container)
+    }
+
+    val running = status?.serviceRunning == true
+    FeatureSummaryCard(
+        icon = Icons.Default.Terminal,
+        title = "SSH Server",
+        statusText = when {
+            status?.configured == false -> "Not Installed"
+            running -> "Running"
+            else -> "Stopped"
+        },
+        statusColor = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        description = "Remote shell and SFTP access to this container",
+        onOpen = onOpen,
+        modifier = modifier
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MoreToolsBottomSheet(
@@ -981,6 +1034,12 @@ private fun MoreToolsBottomSheet(
                 onClick = onNavigateToTurnip
             ),
             MoreToolEntry(
+                title = "File Sharing (FileBridge)",
+                description = "Bidirectional Android storage share & file picker integration",
+                icon = Icons.Default.FolderShared,
+                onClick = onNavigateToFileSharing
+            ),
+            MoreToolEntry(
                 title = "Wireless Display (VNC & Stream)",
                 description = "Remote desktop viewing via VNC server or H.264 video stream",
                 icon = Icons.Default.Cast,
@@ -988,11 +1047,36 @@ private fun MoreToolsBottomSheet(
                 onClick = onNavigateToWireless
             ),
             MoreToolEntry(
+                title = "Docker Engine",
+                description = "Daemon status, TCP exposure & rootless docker configurations",
+                icon = Icons.Default.Layers,
+                isVisible = container.dockerEnabled || container.isRunning,
+                onClick = onNavigateToDocker
+            ),
+            MoreToolEntry(
                 title = "Scrcpy Screen Mirroring",
                 description = "Mirror & control Android screen inside container session",
                 icon = Icons.Default.PhoneAndroid,
                 isVisible = container.scrcpyEnabled || container.isRunning,
                 onClick = onNavigateToScrcpy
+            ),
+            MoreToolEntry(
+                title = "Tailscale VPN",
+                description = "Zero-config mesh VPN networking for container instances",
+                icon = Icons.Default.VpnKey,
+                onClick = onNavigateToTailscale
+            ),
+            MoreToolEntry(
+                title = "Caddy Reverse Proxy",
+                description = "Reverse proxy, auto HTTPS, Docker & Host Caddyfile editor",
+                icon = Icons.Default.Dns,
+                onClick = onNavigateToCaddy
+            ),
+            MoreToolEntry(
+                title = "Network Discovery",
+                description = "Broadcast and scan container services on local network",
+                icon = Icons.Default.QrCode2,
+                onClick = onNavigateToNetworkDiscovery
             )
         ).filter { it.isVisible }
     }

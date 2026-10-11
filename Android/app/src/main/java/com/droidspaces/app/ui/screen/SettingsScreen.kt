@@ -75,6 +75,7 @@ fun SettingsScreen(
     onNavigateToRequirements: () -> Unit = {},
     onNavigateToAutoBootPriority: () -> Unit = {},
     onNavigateToTerminalAppearance: () -> Unit = {},
+    onNavigateToNetworkDiscovery: () -> Unit = {},
     onNavigateToAnlandGuide: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -282,6 +283,34 @@ fun SettingsScreen(
                     )
                 },
                 modifier = Modifier.then(if (autoBootUsable) Modifier.clickable { onNavigateToAutoBootPriority() } else Modifier)
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+            ListItem(colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                leadingContent = {
+                    Icon(
+                        imageVector = Icons.Default.Wifi,
+                        contentDescription = null
+                    )
+                },
+                headlineContent = {
+                    Text(
+                        text = context.getString(R.string.network_discovery),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                supportingContent = {
+                    Text(context.getString(R.string.network_discovery_description))
+                },
+                trailingContent = {
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = null
+                    )
+                },
+                modifier = Modifier.clickable { onNavigateToNetworkDiscovery() }
             )
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
