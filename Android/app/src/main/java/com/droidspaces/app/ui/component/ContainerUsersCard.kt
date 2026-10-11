@@ -114,7 +114,12 @@ fun ContainerUsersCard(
         }
     }
 
-
+    fun refreshUsers() {
+        scope.launch {
+            users = ContainerUsersManager.getUsers(containerName, useCache = false)
+            onRefreshUsers()
+        }
+    }
 
     Surface(
         modifier = modifier
