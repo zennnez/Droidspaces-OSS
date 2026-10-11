@@ -48,15 +48,19 @@
 /* Append an rtattr with optional payload to a netlink message */
 static struct rtattr *nl_addattr(struct nlmsghdr *n, int maxlen, int type,
                                  const void *data, int dlen) {
-  int len = RTA_LENGTH(dlen);
-  if ((int)(NLMSG_ALIGN(n->nlmsg_len) + RTA_ALIGN(len)) > maxlen)
+  if (maxlen <= 0 || dlen < 0 || n->nlmsg_len > (unsigned int)maxlen)
+    return NULL;
+  unsigned int rta_len = (unsigned int)RTA_LENGTH(dlen);
+  unsigned int aligned_msg = (unsigned int)NLMSG_ALIGN(n->nlmsg_len);
+  unsigned int aligned_rta = (unsigned int)RTA_ALIGN(rta_len);
+  if (aligned_msg + aligned_rta > (unsigned int)maxlen)
     return NULL;
   struct rtattr *rta = NLMSG_TAIL(n);
   rta->rta_type = (unsigned short)type;
-  rta->rta_len = (unsigned short)len;
+  rta->rta_len = (unsigned short)rta_len;
   if (dlen && data)
     memcpy(RTA_DATA(rta), data, (size_t)dlen);
-  n->nlmsg_len = NLMSG_ALIGN(n->nlmsg_len) + RTA_ALIGN(len);
+  n->nlmsg_len = aligned_msg + aligned_rta;
   return rta;
 }
 

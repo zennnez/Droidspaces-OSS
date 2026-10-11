@@ -1643,6 +1643,12 @@ static int pf_state_remove(const char *container_ip) {
                      cont_ip_buf,   "--dport", cont_port_str, "-j",
                      "MASQUERADE",  NULL};
       run_command_quiet(del);
+    } else if (strcmp(variant, "input_accept") == 0) {
+      /* INPUT ACCEPT for the host-facing forwarded port */
+      char *del[] = {"iptables", "-D",          "INPUT",  "-p",
+                     proto,      "--dport",      host_port_str, "-j",
+                     "ACCEPT",   NULL};
+      run_command_quiet(del);
     }
   }
 
@@ -1792,12 +1798,23 @@ int ds_ipt_add_portforwards(struct ds_port_forward *pfs, int count,
     if (run_command_quiet(fwd) != 0)
       ds_warn("portforward: FORWARD insert failed for port %s", cont_port_str);
 
+    /* Host-facing INPUT ACCEPT rule */
+    char *inp[] = {"iptables", "-I",     "INPUT",   "1",
+                   "-p",       pf->proto, "--dport", host_port_str,
+                   "-j",       "ACCEPT",  NULL};
+    int inp_ok = (run_command_quiet(inp) == 0);
+    if (!inp_ok)
+      ds_warn("portforward: INPUT ACCEPT failed for host port %s", host_port_str);
+
     /* Record this rule in the state file only if the DNAT insert succeeded.
-     * The FORWARD rule is always attempted; if it failed ds_warn was already
+     * The FORWARD and INPUT rules are always attempted; if they failed ds_warn was already
      * emitted, but we still record the entry so removal can clean up the
      * DNAT side on stop. */
     if (inserted_variant)
       pf_state_append(state_f, inserted_variant, pf->proto, host_port_str,
+                      to_dest, cont_port_str);
+    if (inp_ok)
+      pf_state_append(state_f, "input_accept", pf->proto, host_port_str,
                       to_dest, cont_port_str);
 
     /* Localhost forwarding: 127.0.0.1:<host_port> -> <container_ip>:<cont_port>
@@ -1927,6 +1944,12 @@ int ds_ipt_remove_portforwards(struct ds_config *cfg) {
                        "ACCEPT",
                        NULL};
     run_command_quiet(del_fwd);
+
+    /* INPUT ACCEPT */
+    char *del_inp[] = {"iptables", "-D",     "INPUT",   "-p",
+                       pf->proto,  "--dport", host_port_str, "-j",
+                       "ACCEPT",   NULL};
+    run_command_quiet(del_inp);
 
     /* Localhost OUTPUT DNAT */
     char *del_lo[] = {"iptables",    "-t",
