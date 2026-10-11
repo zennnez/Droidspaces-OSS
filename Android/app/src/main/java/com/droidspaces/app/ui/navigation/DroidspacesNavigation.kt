@@ -937,14 +937,8 @@ fun DroidspacesNavigation(
         ) { backStackEntry ->
             val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
             val initialCommand = backStackEntry.arguments?.getString("initialCommand")
-            // Resolve cached users for the user picker dialog
-            val users = remember(containerName) {
-                com.droidspaces.app.util.ContainerUsersManager.getCachedUsers(containerName)
-                    ?: listOf("root")
-            }
             ContainerTerminalScreen(
                 containerName = containerName,
-                initialUsers = users,
                 initialCommand = initialCommand,
                 onNavigateBack = {
                     navController.popBackStack()
