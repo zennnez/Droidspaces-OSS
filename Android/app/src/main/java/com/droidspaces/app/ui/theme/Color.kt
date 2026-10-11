@@ -190,6 +190,56 @@ enum class ThemePalette(
             surfaceContainerHighest = Color(0xFF33343A),
         ),
     ),
+    // Generated from GNOME's accent blue #3584E4, as on a Fedora Workstation desktop, with
+    // the Content style of Material color utilities, spec 2021. Content keeps the seed's
+    // chroma, so the containers land on the GNOME tile blue; Tonal Spot would mute it into
+    // a near copy of One UI.
+    FEDORA(
+        displayName = "Fedora",
+        swatch = listOf(Color(0xFF75ADFF), Color(0xFF8CACE2), Color(0xFFD594E4)),
+        primaryLight = Color(0xFF005CAE),   // Blue
+        secondaryLight = Color(0xFF485F84), // Steel Blue
+        tertiaryLight = Color(0xFF863C9C),  // Purple
+        primaryDark = Color(0xFFA7C8FF),    // Light Blue
+        secondaryDark = Color(0xFFAFC8F2),  // Light Steel Blue
+        tertiaryDark = Color(0xFFF0B0FF),   // Light Purple
+        fixedLight = lightColorScheme(
+            primary = Color(0xFF005CAE), onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFF1C75D4), onPrimaryContainer = Color(0xFFFEFCFF),
+            inversePrimary = Color(0xFFA7C8FF),
+            secondary = Color(0xFF485F84), onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFFBBD3FE), onSecondaryContainer = Color(0xFF435A7F),
+            tertiary = Color(0xFF863C9C), onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFA156B7), onTertiaryContainer = Color(0xFFFFFBFF),
+            background = Color(0xFFF9F9FF), onBackground = Color(0xFF191C22),
+            surface = Color(0xFFF9F9FF), onSurface = Color(0xFF191C22),
+            surfaceVariant = Color(0xFFDDE2F1), onSurfaceVariant = Color(0xFF414752),
+            inverseSurface = Color(0xFF2D3037), inverseOnSurface = Color(0xFFEFF0F9),
+            outline = Color(0xFF717784), outlineVariant = Color(0xFFC1C6D4),
+            surfaceBright = Color(0xFFF9F9FF), surfaceDim = Color(0xFFD8DAE2),
+            surfaceContainerLowest = Color(0xFFFFFFFF), surfaceContainerLow = Color(0xFFF2F3FC),
+            surfaceContainer = Color(0xFFECEDF6), surfaceContainerHigh = Color(0xFFE6E8F0),
+            surfaceContainerHighest = Color(0xFFE0E2EB),
+        ),
+        fixedDark = darkColorScheme(
+            primary = Color(0xFFA7C8FF), onPrimary = Color(0xFF003061),
+            primaryContainer = Color(0xFF4691F2), onPrimaryContainer = Color(0xFF001C3C),
+            inversePrimary = Color(0xFF005EB2),
+            secondary = Color(0xFFAFC8F2), onSecondary = Color(0xFF173153),
+            secondaryContainer = Color(0xFF2F476B), onSecondaryContainer = Color(0xFF9EB6E0),
+            tertiary = Color(0xFFF0B0FF), onTertiary = Color(0xFF54016C),
+            tertiaryContainer = Color(0xFFC072D6), onTertiaryContainer = Color(0xFF340045),
+            background = Color(0xFF101319), onBackground = Color(0xFFE0E2EB),
+            surface = Color(0xFF101319), onSurface = Color(0xFFE0E2EB),
+            surfaceVariant = Color(0xFF414752), onSurfaceVariant = Color(0xFFC1C6D4),
+            inverseSurface = Color(0xFFE0E2EB), inverseOnSurface = Color(0xFF2D3037),
+            outline = Color(0xFF8B919E), outlineVariant = Color(0xFF414752),
+            surfaceBright = Color(0xFF363940), surfaceDim = Color(0xFF101319),
+            surfaceContainerLowest = Color(0xFF0B0E14), surfaceContainerLow = Color(0xFF191C22),
+            surfaceContainer = Color(0xFF1D2026), surfaceContainerHigh = Color(0xFF272A30),
+            surfaceContainerHighest = Color(0xFF32353B),
+        ),
+    ),
     CATPPUCCIN(
         displayName = "Catppuccin",
         primaryLight = Color(0xFF8AADF4),   // Blue
