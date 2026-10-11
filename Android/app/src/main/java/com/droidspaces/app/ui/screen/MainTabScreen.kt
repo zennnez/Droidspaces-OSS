@@ -155,6 +155,20 @@ fun MainTabScreen(
         }
     }
 
+    // Auto-refresh container state when returning to the app (e.g. after starting via shortcut)
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                containerViewModel.silentRefresh()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     // Map backend status to UI status - remember previous status to prevent glitches
     val currentBackendStatus = appStateViewModel.backendStatus
     val prefsManager = remember { PreferencesManager.getInstance(context) }

@@ -53,6 +53,15 @@
                 android:resource="@xml/shortcuts" />
         </activity>
 
+        <!-- Direct container launcher from launcher shortcuts without showing main UI -->
+        <activity
+            android:name=".ui.shortcut.ContainerShortcutActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Transparent.NoAnimation"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="" />
+
         <service
             android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
             android:enabled="false"

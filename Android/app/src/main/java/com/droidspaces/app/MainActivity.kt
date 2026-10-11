@@ -59,6 +59,9 @@ class MainActivity : AppCompatActivity() {
             handleIntent(intent)
         }
 
+        // Initialize / sync launcher shortcuts for all created containers
+        com.droidspaces.app.util.ContainerShortcutHelper.updateShortcuts(applicationContext)
+
         // Render UI immediately - no blocking operations
         setContent {
             ThemeWrapper {

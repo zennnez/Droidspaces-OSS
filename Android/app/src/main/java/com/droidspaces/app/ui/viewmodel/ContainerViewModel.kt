@@ -119,6 +119,9 @@ class ContainerViewModel(application: Application) : AndroidViewModel(applicatio
         prefsManager.saveCachedContainers(result)
         prefsManager.cachedRunningCount = result.count { it.isRunning }
 
+        // Update launcher dynamic shortcuts for created containers
+        com.droidspaces.app.util.ContainerShortcutHelper.updateShortcuts(getApplication(), result)
+
         // Prefetch distro icons for running containers (updates persistent cache)
         result.filter { it.isRunning }.forEach { container ->
             viewModelScope.launch(Dispatchers.IO) {
@@ -134,6 +137,22 @@ class ContainerViewModel(application: Application) : AndroidViewModel(applicatio
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to prime user cache for ${container.name}")
                 }
+            }
+        }
+    }
+
+    /**
+     * Silent background refresh without UI indicators.
+     */
+    fun silentRefresh() {
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    ContainerManager.listContainers()
+                }
+                updateState(result)
+            } catch (e: Exception) {
+                Log.e(TAG, "Silent refresh failed", e)
             }
         }
     }
