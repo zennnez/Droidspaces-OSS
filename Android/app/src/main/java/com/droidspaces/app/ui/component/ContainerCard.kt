@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Article
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -53,6 +54,10 @@ data class ContainerCardActions(
     val onUninstall: () -> Unit = {},
     val onMigrate: () -> Unit = {},
     val onResize: () -> Unit = {},
+    val onRepairAndCompact: () -> Unit = {},
+    val onConvertToDir: () -> Unit = {},
+    val onMoveStorage: () -> Unit = {},
+    val onSnapshots: () -> Unit = {},
     val onExport: () -> Unit = {},
     val onToggleExpand: () -> Unit = {},
     val onShowLogs: () -> Unit = {},
@@ -75,6 +80,10 @@ fun ContainerCard(
     val onUninstall = actions.onUninstall
     val onMigrate = actions.onMigrate
     val onResize = actions.onResize
+    val onRepairAndCompact = actions.onRepairAndCompact
+    val onConvertToDir = actions.onConvertToDir
+    val onMoveStorage = actions.onMoveStorage
+    val onSnapshots = actions.onSnapshots
     val onExport = actions.onExport
     val onToggleExpand = actions.onToggleExpand
     val onShowLogs = actions.onShowLogs
@@ -327,18 +336,44 @@ fun ContainerCard(
                         )
                     } else {
                         ActionItem(
+                            icon = Icons.Default.Build,
+                            label = "Repair & Compact Image",
+                            tint = MaterialTheme.colorScheme.primary,
+                            onClick = { onRepairAndCompact() }
+                        )
+                        ActionItem(
                             icon = painterResource(id = R.drawable.ic_disk),
                             label = context.getString(R.string.resize_sparse_image),
                             tint = MaterialTheme.colorScheme.secondary,
                             onClick = { onResize() }
                         )
+                        ActionItem(
+                            icon = Icons.Default.FolderOpen,
+                            label = "Convert to Directory",
+                            tint = MaterialTheme.colorScheme.secondary,
+                            onClick = { onConvertToDir() }
+                        )
                     }
+
+                    ActionItem(
+                        icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                        label = "Move storage location",
+                        tint = MaterialTheme.colorScheme.secondary,
+                        onClick = { onMoveStorage() }
+                    )
 
                     ActionItem(
                         icon = Icons.Default.FileDownload,
                         label = context.getString(R.string.export_container),
                         tint = MaterialTheme.colorScheme.tertiary,
                         onClick = { onExport() }
+                    )
+
+                    ActionItem(
+                        icon = Icons.Default.History,
+                        label = "Snapshots & Rollback",
+                        tint = MaterialTheme.colorScheme.primary,
+                        onClick = { onSnapshots() }
                     )
 
                     ActionItem(

@@ -197,6 +197,24 @@
     <string name="disk_usage">Disk Usage</string>
     <string name="disk_usage_used_of_total">%1$s / %2$s used</string>
     <string name="disk_usage_calculating">Calculating…</string>
+
+    <!-- Disk Usage Explorer Screen -->
+    <string name="disk_usage_explorer_title">Disk Usage</string>
+    <string name="disk_usage_root_label">Root</string>
+    <string name="disk_usage_empty_title">Nothing here</string>
+    <string name="disk_usage_empty_description">This folder is empty.</string>
+    <string name="disk_usage_load_error">Unable to read this folder</string>
+    <string name="disk_usage_retry">Retry</string>
+    <string name="disk_usage_delete_title">Delete %1$s?</string>
+    <string name="disk_usage_delete_message">This will permanently delete this item and everything inside it from the container. This cannot be undone.</string>
+    <string name="disk_usage_delete_sensitive_title">This folder is sensitive</string>
+    <string name="disk_usage_delete_sensitive_message">%1$s is part of the container\'s core system files. Deleting it may leave the container unable to boot or start a shell again.</string>
+    <string name="disk_usage_delete_confirm">Delete</string>
+    <string name="disk_usage_confirm_phrase">DELETE</string>
+    <string name="disk_usage_confirm_instruction">Type \"%1$s\" to confirm:</string>
+    <string name="disk_usage_deleting">Deleting…</string>
+    <string name="disk_usage_delete_success">Deleted %1$s</string>
+    <string name="disk_usage_delete_failed">Failed to delete %1$s</string>
     <string name="systemd">Systemd</string>
     <string name="checking">Checking</string>
     <string name="not_available">Not Available</string>

@@ -28,16 +28,25 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.OutputStream
 
+import com.droidspaces.app.util.ContainerDiskUsageManager
+import com.droidspaces.app.util.ContainerInstaller
+import com.droidspaces.app.util.ContainerSnapshot
+import com.droidspaces.app.util.ContainerSnapshotManager
+import com.droidspaces.app.util.MoveStorageOperations
+import com.droidspaces.app.util.MoveStoragePhase
+import com.droidspaces.app.util.MoveVerificationMethod
+
 /** Progress state for the stop/uninstall flow (drives the ProgressDialog). */
 sealed class UninstallState {
     data object Idle : UninstallState()
     data class InProgress(val containerName: String, val message: String) : UninstallState()
 }
 
-/** A pending sparse-image operation awaiting a size from the user. */
+/** A pending sparse-image operation awaiting user parameters. */
 sealed class SparseOperation {
-    data class Migrate(val container: ContainerInfo) : SparseOperation()
+    data class Migrate(val container: ContainerInfo, val targetImagePath: String? = null) : SparseOperation()
     data class Resize(val container: ContainerInfo) : SparseOperation()
+    data class ConvertToDir(val container: ContainerInfo, val targetDirPath: String? = null) : SparseOperation()
 }
 
 /**
@@ -78,7 +87,7 @@ class ContainerOperationsViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissUninstallLogs() { uninstallLogsDialog = null }
 
     /** Get-or-create the streaming log buffer for [name] (matches the previous inline pattern). */
-    private fun logsFor(name: String): SnapshotStateList<Pair<Int, String>> {
+    fun logsFor(name: String): SnapshotStateList<Pair<Int, String>> {
         containerLogs[name]?.let { return it }
         val newLogs = mutableStateListOf<Pair<Int, String>>()
         containerLogs = containerLogs.toMutableMap().apply { put(name, newLogs) }
@@ -232,6 +241,75 @@ class ContainerOperationsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── Move Storage ──────────────────────────────────────────────────────────
+    suspend fun executeMoveStorage(
+        container: ContainerInfo,
+        newStorageDir: String?,
+        verificationMethod: MoveVerificationMethod = MoveVerificationMethod.SHA256,
+        skipFreeSpaceCheck: Boolean = false,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+        onRefresh: () -> Unit,
+    ) {
+        runningOperationContainer = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        showLogViewerFor = container.name
+
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        try {
+            logger.i("Initiating storage relocation for ${container.name}...")
+            val isRunning = ContainerManager.checkContainerStatus(container.name).first
+            if (isRunning) {
+                logger.i(string(R.string.stopping_container))
+                val stopCommand = ContainerCommandBuilder.buildStopCommand(container)
+                val stopResult = ContainerOperationExecutor.executeCommand(stopCommand, "stop", logger)
+                if (!stopResult) {
+                    logger.e(string(R.string.failed_to_stop_container, container.name))
+                    onError(string(R.string.failed_to_stop_container, container.name))
+                    onRefresh()
+                    return
+                }
+            }
+
+            logger.i("Starting storage move to ${newStorageDir ?: "internal storage"}...")
+            val result = ContainerManager.moveContainerStorage(
+                appContext, container, newStorageDir, logger,
+                verificationMethod = verificationMethod,
+                skipFreeSpaceCheck = skipFreeSpaceCheck,
+                onProgress = { phase, percent, _, _, detail ->
+                    val phaseLabel = when (phase) {
+                        MoveStoragePhase.COPYING -> "[COPY]"
+                        MoveStoragePhase.VERIFYING -> "[VERIFY]"
+                        MoveStoragePhase.DELETING -> "[CLEANUP]"
+                    }
+                    val msg = if (percent != null) "$phaseLabel $detail ($percent%)" else "$phaseLabel $detail"
+                    logger.logImmediate(android.util.Log.INFO, msg)
+                }
+            )
+
+            if (result.isFailure) {
+                val msg = result.exceptionOrNull()?.message ?: "Failed to move ${container.name}'s storage"
+                logger.e(msg)
+                onError(msg)
+            } else {
+                val dest = result.getOrNull()
+                logger.i("Successfully moved ${container.name} to $dest")
+                onSuccess("Moved ${container.name} to $dest")
+            }
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Exception during move: ${e.message}")
+            logger.e(e.stackTraceToString())
+            onError("Failed to move ${container.name}'s storage: ${e.message}")
+            onRefresh()
+        } finally {
+            runningOperationContainer = null
+        }
+    }
+
     // ── Start / Stop / Restart ────────────────────────────────────────────────
     suspend fun executeOperation(
         container: ContainerInfo,
@@ -249,20 +327,26 @@ class ContainerOperationsViewModel(app: Application) : AndroidViewModel(app) {
         val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
 
         try {
+            val effectiveContainer = if (operation == "start" || operation == "restart") {
+                ContainerManager.autoDetectAndRemapContainerPath(appContext, container, logger)
+            } else {
+                container
+            }
+
             if (operation == "stop" || operation == "restart") {
                 appContext.startService(
                     Intent(appContext, TerminalSessionService::class.java).apply {
                         action = TerminalSessionService.ACTION_STOP_CONTAINER_SESSIONS
-                        putExtra(TerminalSessionService.EXTRA_CONTAINER_NAME, container.name)
+                        putExtra(TerminalSessionService.EXTRA_CONTAINER_NAME, effectiveContainer.name)
                     }
                 )
-                onClearUsage(container.name)
+                onClearUsage(effectiveContainer.name)
             }
 
             val command = when (operation) {
-                "start" -> ContainerCommandBuilder.buildStartCommand(container)
-                "stop" -> ContainerCommandBuilder.buildStopCommand(container)
-                "restart" -> ContainerCommandBuilder.buildRestartCommand(container)
+                "start" -> ContainerCommandBuilder.buildStartCommand(effectiveContainer)
+                "stop" -> ContainerCommandBuilder.buildStopCommand(effectiveContainer)
+                "restart" -> ContainerCommandBuilder.buildRestartCommand(effectiveContainer)
                 else -> {
                     runningOperationContainer = null
                     return
@@ -304,12 +388,13 @@ class ContainerOperationsViewModel(app: Application) : AndroidViewModel(app) {
     // ── Sparse migrate / resize ─────────────────────────────────────────────────
     suspend fun executeSparseOperation(
         operation: SparseOperation,
-        sizeGb: Int,
+        sizeGb: Int = 8,
         onRefresh: () -> Unit,
     ) {
         val container = when (operation) {
             is SparseOperation.Migrate -> operation.container
             is SparseOperation.Resize -> operation.container
+            is SparseOperation.ConvertToDir -> operation.container
         }
 
         runningOperationContainer = container.name
@@ -356,16 +441,13 @@ class ContainerOperationsViewModel(app: Application) : AndroidViewModel(app) {
 
             val cmd = when (operation) {
                 is SparseOperation.Migrate -> {
-                    // sparsemgr derives <dir>/rootfs and <dir>/rootfs.img from -d, so it
-                    // wants the rootfs's own parent, not the container directory. Refuse
-                    // anything not laid out that way rather than pointing it at a path
-                    // that does not exist.
-                    if (rootfsPath.substringAfterLast('/') != "rootfs") {
-                        logger.e("Rootfs at $rootfsPath is not a directory-mode rootfs; cannot migrate.")
-                        return
-                    }
                     logger.i(string(R.string.starting_migration))
-                    "$qScript -d ${ContainerCommandBuilder.quote(rootfsParent)} migrate $sizeGb"
+                    val targetImg = operation.targetImagePath?.takeIf { it.isNotBlank() }
+                    if (targetImg != null) {
+                        "$qScript -d ${ContainerCommandBuilder.quote(rootfsParent)} -o ${ContainerCommandBuilder.quote(targetImg)} migrate $sizeGb"
+                    } else {
+                        "$qScript -d ${ContainerCommandBuilder.quote(rootfsParent)} migrate $sizeGb"
+                    }
                 }
                 is SparseOperation.Resize -> {
                     if (rootfsPath.substringAfterLast('/') != "rootfs.img") {
@@ -374,6 +456,11 @@ class ContainerOperationsViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     logger.i(string(R.string.starting_resizing))
                     "$qScript -i ${ContainerCommandBuilder.quote(rootfsPath)} resize $sizeGb --yes"
+                }
+                is SparseOperation.ConvertToDir -> {
+                    logger.i("Starting conversion from sparse image to directory...")
+                    val targetDir = operation.targetDirPath?.takeIf { it.isNotBlank() } ?: "$rootfsParent/rootfs"
+                    "$qScript -i ${ContainerCommandBuilder.quote(rootfsPath)} -d ${ContainerCommandBuilder.quote(targetDir)} unpack"
                 }
             }
 
@@ -387,21 +474,33 @@ class ContainerOperationsViewModel(app: Application) : AndroidViewModel(app) {
 
             if (success) {
                 logger.i("Updating container configuration...")
-                val updatedConfig = if (operation is SparseOperation.Migrate) {
-                    container.copy(
-                        useSparseImage = true,
-                        sparseImageSizeGB = sizeGb,
-                        // sparsemgr writes the image beside the rootfs it replaced.
-                        rootfsPath = "$rootfsParent/rootfs.img"
-                    )
-                } else {
-                    container.copy(sparseImageSizeGB = sizeGb)
+                val updatedConfig = when (operation) {
+                    is SparseOperation.Migrate -> {
+                        val finalImgPath = operation.targetImagePath?.takeIf { it.isNotBlank() } ?: "$rootfsParent/rootfs.img"
+                        container.copy(
+                            useSparseImage = true,
+                            sparseImageSizeGB = sizeGb,
+                            rootfsPath = finalImgPath
+                        )
+                    }
+                    is SparseOperation.Resize -> {
+                        container.copy(sparseImageSizeGB = sizeGb)
+                    }
+                    is SparseOperation.ConvertToDir -> {
+                        val targetDir = operation.targetDirPath?.takeIf { it.isNotBlank() } ?: "$rootfsParent/rootfs"
+                        ContainerInstaller.applyPostExtractionFixes(appContext, targetDir, logger)
+                        container.copy(
+                            useSparseImage = false,
+                            sparseImageSizeGB = null,
+                            rootfsPath = targetDir
+                        )
+                    }
                 }
                 val configResult = withContext(Dispatchers.IO) {
                     ContainerManager.updateContainerConfig(appContext, container.name, updatedConfig)
                 }
                 if (configResult.isSuccess) {
-                    logger.i("Configuration updated successfully")
+                    logger.i("Configuration updated successfully ✓")
                     onRefresh()
                 } else {
                     logger.w("Warning: Failed to update container.config: ${configResult.exceptionOrNull()?.message}")
@@ -417,6 +516,269 @@ class ContainerOperationsViewModel(app: Application) : AndroidViewModel(app) {
             prefsManager.saveContainerLogs(container.name, logs.toList())
             delay(500)
             runningOperationContainer = null
+        }
+    }
+
+    // ── Repair & Compact Sparse Image ────────────────────────────────────────
+    suspend fun executeRepairAndCompact(
+        container: ContainerInfo,
+        runFstrim: Boolean,
+        compactToUtilized: Boolean,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        runningOperationContainer = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+
+        var scriptFile: File? = null
+        try {
+            val isRunning = ContainerManager.checkContainerStatus(container.name).first
+            if (isRunning) {
+                logger.i("Stopping container '${container.name}' before filesystem maintenance...")
+                val stopCommand = ContainerCommandBuilder.buildStopCommand(container)
+                val stopResult = ContainerOperationExecutor.executeCommand(stopCommand, "stop", logger)
+                if (!stopResult) {
+                    logger.e("Failed to stop container '${container.name}'.")
+                    onError("Failed to stop container before maintenance")
+                    return
+                }
+                delay(1000)
+            }
+
+            logs.clear()
+            showLogViewerFor = container.name
+            logger.i("Starting Repair & Compact for '${container.name}'...")
+            if (runFstrim) logger.i("Option: Discard unused free blocks (fstrim)")
+            if (compactToUtilized) logger.i("Option: Compact virtual capacity down to utilized size")
+
+            val beforeUsage = ContainerDiskUsageManager.getUsage(container.rootfsPath)
+            if (beforeUsage != null) {
+                logger.i("Current allocated storage: ${MoveStorageOperations.formatBytes(beforeUsage.usedBytes)}")
+                logger.i("Current virtual capacity: ${MoveStorageOperations.formatBytes(beforeUsage.totalBytes)}")
+            }
+
+            val deployedFile = File("${appContext.cacheDir}/sparsemgr.sh")
+            scriptFile = deployedFile
+            appContext.assets.open("sparsemgr.sh").use { input ->
+                deployedFile.outputStream().use { output: OutputStream -> input.copyTo(output) }
+            }
+            Shell.cmd("chmod 755 ${ContainerCommandBuilder.quote(deployedFile.absolutePath)}").exec()
+
+            var flags = "--yes"
+            if (runFstrim) flags += " --fstrim"
+            if (compactToUtilized) flags += " --shrink"
+
+            val cmd = "${ContainerCommandBuilder.quote(deployedFile.absolutePath)} -i ${ContainerCommandBuilder.quote(container.rootfsPath)} compact $flags"
+            val success = ContainerOperationExecutor.executeCommand(
+                command = cmd,
+                operation = "repair_compact",
+                logger = logger,
+                skipHeader = true,
+                operationCompletedMessage = "Filesystem check & compaction completed"
+            )
+
+            if (success) {
+                delay(300)
+                val afterUsage = ContainerDiskUsageManager.getUsage(container.rootfsPath)
+                if (beforeUsage != null && afterUsage != null) {
+                    val beforeUsed = MoveStorageOperations.formatBytes(beforeUsage.usedBytes)
+                    val afterUsed = MoveStorageOperations.formatBytes(afterUsage.usedBytes)
+                    val beforeCap = MoveStorageOperations.formatBytes(beforeUsage.totalBytes)
+                    val afterCap = MoveStorageOperations.formatBytes(afterUsage.totalBytes)
+                    logger.i("Storage Footprint: $beforeUsed -> $afterUsed")
+                    logger.i("Virtual Capacity:  $beforeCap -> $afterCap")
+
+                    if (container.useSparseImage && afterUsage.totalBytes > 0) {
+                        val newSizeGb = Math.max(1, ((afterUsage.totalBytes + 1024L * 1024L * 1024L - 1) / (1024L * 1024L * 1024L)).toInt())
+                        logger.i("Updating container configuration with current capacity: ${newSizeGb}GB...")
+                        val updatedConfig = container.copy(sparseImageSizeGB = newSizeGb)
+                        withContext(Dispatchers.IO) {
+                            ContainerManager.updateContainerConfig(appContext, container.name, updatedConfig)
+                        }
+                    }
+                }
+                logger.i("Maintenance completed successfully ✓")
+                onSuccess("Image repaired and compacted successfully")
+            } else {
+                logger.e("Repair & Compact failed.")
+                onError("Failed to repair and compact container image")
+            }
+
+            if (isRunning) {
+                logger.i("Restarting container '${container.name}'...")
+                val startCommand = ContainerCommandBuilder.buildStartCommand(container)
+                ContainerOperationExecutor.executeCommand(startCommand, "start", logger)
+            }
+
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error during repair & compact: ${e.message}")
+            logger.e(e.stackTraceToString())
+            onError("Error during maintenance: ${e.message}")
+        } finally {
+            scriptFile?.delete()
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    // ── Snapshots & Rollback ─────────────────────────────────────────────────
+    suspend fun executeCreateSnapshot(
+        container: ContainerInfo,
+        label: String,
+        description: String = "",
+        enableCompression: Boolean = false,
+        compressionLevel: Int = 6,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        runningOperationContainer = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+        showLogViewerFor = container.name
+
+        try {
+            val isRunning = ContainerManager.checkContainerStatus(container.name).first
+            if (isRunning) {
+                logger.i("Stopping container '${container.name}' before creating snapshot...")
+                val stopCommand = ContainerCommandBuilder.buildStopCommand(container)
+                val stopResult = ContainerOperationExecutor.executeCommand(stopCommand, "stop", logger)
+                if (!stopResult) {
+                    logger.e("Failed to stop container '${container.name}'.")
+                    onError("Failed to stop container for snapshot")
+                    return
+                }
+                delay(1000)
+            }
+
+            logger.i("Creating snapshot '$label' for '${container.name}' (compression: $enableCompression, level: $compressionLevel)...")
+            val success = withContext(Dispatchers.IO) {
+                ContainerSnapshotManager.createSnapshot(
+                    container = container,
+                    label = label,
+                    description = description,
+                    enableCompression = enableCompression,
+                    compressionLevel = compressionLevel,
+                    onProgress = { logger.logImmediate(android.util.Log.INFO, it) }
+                )
+            }
+
+            if (success) {
+                logger.i("Snapshot created successfully with SHA-256 integrity hash ✓")
+                onSuccess("Snapshot created successfully")
+            } else {
+                logger.e("Failed to create snapshot.")
+                onError("Failed to create container snapshot")
+            }
+
+            if (isRunning) {
+                logger.i("Restarting container '${container.name}'...")
+                val startCommand = ContainerCommandBuilder.buildStartCommand(container)
+                ContainerOperationExecutor.executeCommand(startCommand, "start", logger)
+            }
+
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error creating snapshot: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeRestoreSnapshot(
+        container: ContainerInfo,
+        snapshot: ContainerSnapshot,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        runningOperationContainer = container.name
+        val logs = logsFor(container.name)
+        logs.clear()
+        prefsManager.clearContainerLogs(container.name)
+        val logger = ViewModelLogger { level, message -> logs.add(level to message) }.apply { verbose = true }
+        showLogViewerFor = container.name
+
+        try {
+            val isRunning = ContainerManager.checkContainerStatus(container.name).first
+            if (isRunning) {
+                logger.i("Stopping container '${container.name}' before rollback...")
+                val stopCommand = ContainerCommandBuilder.buildStopCommand(container)
+                val stopResult = ContainerOperationExecutor.executeCommand(stopCommand, "stop", logger)
+                if (!stopResult) {
+                    logger.e("Failed to stop container '${container.name}'.")
+                    onError("Failed to stop container for rollback")
+                    return
+                }
+                delay(1000)
+            }
+
+            logger.i("Verifying checksum and rolling back container '${container.name}' to snapshot '${snapshot.label}' (${snapshot.formattedDate})...")
+            val restoreResult = withContext(Dispatchers.IO) {
+                ContainerSnapshotManager.restoreSnapshot(
+                    container = container,
+                    snapshot = snapshot,
+                    onProgress = { logger.logImmediate(android.util.Log.INFO, it) }
+                )
+            }
+
+            if (restoreResult.isSuccess) {
+                logger.i("Rollback completed successfully ✓")
+                onSuccess("Container rolled back to snapshot successfully")
+            } else {
+                val errorMsg = restoreResult.exceptionOrNull()?.message ?: "Failed to restore snapshot"
+                logger.e("Rollback aborted: $errorMsg")
+                onError(errorMsg)
+            }
+
+            if (isRunning) {
+                logger.i("Restarting container '${container.name}'...")
+                val startCommand = ContainerCommandBuilder.buildStartCommand(container)
+                ContainerOperationExecutor.executeCommand(startCommand, "start", logger)
+            }
+
+            onRefresh()
+        } catch (e: Exception) {
+            logger.e("Error restoring snapshot: ${e.message}")
+            onError("Error: ${e.message}")
+        } finally {
+            prefsManager.saveContainerLogs(container.name, logs.toList())
+            delay(500)
+            runningOperationContainer = null
+        }
+    }
+
+    suspend fun executeDeleteSnapshot(
+        container: ContainerInfo,
+        snapshotId: String,
+        onRefresh: () -> Unit,
+        onError: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+    ) {
+        try {
+            val success = withContext(Dispatchers.IO) {
+                ContainerSnapshotManager.deleteSnapshot(container, snapshotId)
+            }
+            if (success) {
+                onSuccess("Snapshot deleted")
+                onRefresh()
+            } else {
+                onError("Failed to delete snapshot")
+            }
+        } catch (e: Exception) {
+            onError("Error deleting snapshot: ${e.message}")
         }
     }
 }

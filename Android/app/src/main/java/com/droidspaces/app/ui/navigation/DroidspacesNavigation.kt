@@ -42,6 +42,8 @@ import com.droidspaces.app.ui.screen.OverrideEditorScreen
 import com.droidspaces.app.ui.screen.ProcdScreen
 import com.droidspaces.app.ui.screen.OpenRCScreen
 import com.droidspaces.app.ui.screen.ContainerTerminalScreen
+import com.droidspaces.app.ui.screen.SnapshotsScreen
+import com.droidspaces.app.ui.screen.DiskUsageScreen
 import com.droidspaces.app.ui.viewmodel.ContainerInstallationViewModel
 import com.droidspaces.app.ui.viewmodel.ContainerViewModel
 import com.droidspaces.app.util.ContainerManager
@@ -124,6 +126,12 @@ sealed class Screen(val route: String) {
 
     data object Terminal : Screen("terminal/{containerName}") {
         fun createRoute(containerName: String) = "terminal/${Uri.encode(containerName)}"
+    }
+    data object DiskUsage : Screen("disk_usage/{containerName}") {
+        fun createRoute(containerName: String) = "disk_usage/${Uri.encode(containerName)}"
+    }
+    data object SnapshotsManage : Screen("snapshots_manage/{containerName}") {
+        fun createRoute(containerName: String) = "snapshots_manage/${Uri.encode(containerName)}"
     }
 }
 
@@ -350,6 +358,9 @@ fun DroidspacesNavigation(
                 },
                 onNavigateToTerminal = { containerName ->
                     navController.navigate(Screen.Terminal.createRoute(containerName))
+                },
+                onNavigateToSnapshots = { containerName ->
+                    navController.navigate(Screen.SnapshotsManage.createRoute(containerName))
                 }
             )
         }
@@ -808,6 +819,36 @@ fun DroidspacesNavigation(
                     navController.popBackStack()
                     sharedContainerViewModel.refresh()
                 }
+            )
+        }
+
+        composable(
+            route = Screen.SnapshotsManage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            SnapshotsScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.DiskUsage.route,
+            arguments = listOf(
+                navArgument("containerName") { type = NavType.StringType }
+            ),
+            enterTransition = defaultEnterTransition,
+            exitTransition = defaultExitTransition
+        ) { backStackEntry ->
+            val containerName = backStackEntry.arguments?.getString("containerName") ?: ""
+            DiskUsageScreen(
+                containerName = containerName,
+                onNavigateBack = { navController.popBackStack() }
             )
         }
     }

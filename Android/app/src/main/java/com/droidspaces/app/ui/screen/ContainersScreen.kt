@@ -68,6 +68,16 @@ import com.droidspaces.app.ui.component.ErrorState
 import com.droidspaces.app.ui.component.KernelUnsupportedState
 import com.droidspaces.app.ui.component.RootUnavailableState
 import com.droidspaces.app.ui.component.RootfsRepoSheet
+import com.droidspaces.app.ui.component.ContainerSnapshotsDialog
+import com.droidspaces.app.ui.component.StorageDestinationPicker
+import com.droidspaces.app.ui.component.DsDropdown
+import com.droidspaces.app.util.StorageChecker
+import com.droidspaces.app.util.FilesystemCapabilityReport
+import com.droidspaces.app.util.MoveVerificationMethod
+import com.droidspaces.app.util.ContainerDiskUsageManager
+import com.droidspaces.app.util.MoveStorageOperations
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.graphics.Color
 import com.droidspaces.app.ui.viewmodel.ContainerViewModel
 import com.droidspaces.app.ui.viewmodel.ContainerOperationsViewModel
 import com.droidspaces.app.ui.viewmodel.UninstallState
@@ -87,6 +97,7 @@ fun ContainersScreen(
     onNavigateToInstallation: (Uri) -> Unit = {},
     onNavigateToEditContainer: (String) -> Unit = {},
     onNavigateToContainerDetails: (String) -> Unit = {},
+    onNavigateToSnapshots: (String) -> Unit = {},
     containerViewModel: ContainerViewModel,
     expandedContainerName: String?,
     onExpandedContainerNameChange: (String?) -> Unit,
@@ -105,6 +116,10 @@ fun ContainersScreen(
     // UI-only state (dialog triggers / pending pickers).
     var showUninstallConfirmation by remember { mutableStateOf<ContainerInfo?>(null) }
     var pendingSparseOperation by remember { mutableStateOf<SparseOperation?>(null) }
+    var pendingRepairContainer by remember { mutableStateOf<ContainerInfo?>(null) }
+    var pendingRepairDiskUsage by remember { mutableStateOf<com.droidspaces.app.util.ContainerDiskUsageManager.DiskUsage?>(null) }
+    var pendingMoveStorageContainer by remember { mutableStateOf<ContainerInfo?>(null) }
+    var pendingSnapshotsContainer by remember { mutableStateOf<ContainerInfo?>(null) }
     var pendingExportContainer by remember { mutableStateOf<ContainerInfo?>(null) }
     var pendingExportEnv by remember { mutableStateOf(false) }
     var askExportEnv by remember { mutableStateOf<ContainerInfo?>(null) }
@@ -269,6 +284,26 @@ fun ContainersScreen(
                                 onResize = {
                                     onExpandedContainerNameChange(null)
                                     pendingSparseOperation = SparseOperation.Resize(container)
+                                },
+                                onRepairAndCompact = {
+                                    onExpandedContainerNameChange(null)
+                                    pendingRepairContainer = container
+                                    scope.launch {
+                                        pendingRepairDiskUsage = com.droidspaces.app.util.ContainerDiskUsageManager.getCached(container.rootfsPath)
+                                            ?: com.droidspaces.app.util.ContainerDiskUsageManager.getUsage(container.rootfsPath)
+                                    }
+                                },
+                                onConvertToDir = {
+                                    onExpandedContainerNameChange(null)
+                                    pendingSparseOperation = SparseOperation.ConvertToDir(container)
+                                },
+                                onMoveStorage = {
+                                    onExpandedContainerNameChange(null)
+                                    pendingMoveStorageContainer = container
+                                },
+                                onSnapshots = {
+                                    onExpandedContainerNameChange(null)
+                                    pendingSnapshotsContainer = container
                                 },
                                 onExport = {
                                     onExpandedContainerNameChange(null)
@@ -446,34 +481,76 @@ fun ContainersScreen(
             )
         }
 
-        // Sparse operation size dialog
+        // Sparse operation dialog (Migrate, Resize, ConvertToDir)
         pendingSparseOperation?.let { op ->
-            val container = when (op) {
-                is SparseOperation.Migrate -> op.container
-                is SparseOperation.Resize -> op.container
-            }
-
-            SparseSizeDialog(
-                title = context.getString(
-                    if (op is SparseOperation.Migrate) R.string.migrate_dialog_title
-                    else R.string.resize_dialog_title
-                ),
-                message = context.getString(
-                    if (op is SparseOperation.Migrate) R.string.migrate_dialog_message
-                    else R.string.resize_dialog_message,
-                    container.name
-                ),
-                initialSize = container.sparseImageSizeGB ?: 8,
-                // Only a resize can be a no-op: a migrate has no image yet, so
-                // picking the default size there is a legitimate choice.
-                currentSize = if (op is SparseOperation.Resize) container.sparseImageSizeGB else null,
-                onConfirm = { size ->
+            SparseOperationDialog(
+                operation = op,
+                onConfirm = { size, targetPath ->
+                    val opToRun = when (op) {
+                        is SparseOperation.Migrate -> op.copy(targetImagePath = targetPath)
+                        is SparseOperation.Resize -> op
+                        is SparseOperation.ConvertToDir -> op.copy(targetDirPath = targetPath)
+                    }
                     pendingSparseOperation = null
                     scope.launch {
-                        opsViewModel.executeSparseOperation(op, size, onRefresh = { containerViewModel.refresh() })
+                        opsViewModel.executeSparseOperation(opToRun, size, onRefresh = { containerViewModel.refresh() })
                     }
                 },
                 onDismiss = { pendingSparseOperation = null }
+            )
+        }
+
+        // Sparse repair & compact confirmation dialog
+        pendingRepairContainer?.let { container ->
+            RepairAndCompactDialog(
+                container = container,
+                diskUsage = pendingRepairDiskUsage,
+                onConfirm = { runFstrim, compactToUtilized ->
+                    pendingRepairContainer = null
+                    scope.launch {
+                        opsViewModel.executeRepairAndCompact(
+                            container = container,
+                            runFstrim = runFstrim,
+                            compactToUtilized = compactToUtilized,
+                            onRefresh = { containerViewModel.refresh() },
+                            onError = { msg -> scope.showError(snackbarHostState, msg) },
+                            onSuccess = { msg -> scope.showSuccess(snackbarHostState, msg) }
+                        )
+                    }
+                },
+                onDismiss = { pendingRepairContainer = null }
+            )
+        }
+
+        // Snapshots & Rollback dialog
+        pendingSnapshotsContainer?.let { container ->
+            ContainerSnapshotsDialog(
+                container = container,
+                opsViewModel = opsViewModel,
+                onDismiss = { pendingSnapshotsContainer = null },
+                onRefresh = { containerViewModel.refresh() }
+            )
+        }
+
+        // Move-storage location picker dialog
+        pendingMoveStorageContainer?.let { container ->
+            MoveStorageDialog(
+                container = container,
+                onConfirm = { newPath, verificationMethod, skipFreeSpaceCheck ->
+                    pendingMoveStorageContainer = null
+                    scope.launch {
+                        opsViewModel.executeMoveStorage(
+                            container,
+                            newPath,
+                            verificationMethod,
+                            skipFreeSpaceCheck,
+                            onError = { msg -> scope.showError(snackbarHostState, msg) },
+                            onSuccess = { msg -> scope.showSuccess(snackbarHostState, msg) },
+                            onRefresh = { containerViewModel.refresh() }
+                        )
+                    }
+                },
+                onDismiss = { pendingMoveStorageContainer = null }
             )
         }
     }
@@ -485,64 +562,783 @@ private fun exportFileName(container: ContainerInfo): String {
     return "${container.name}_${timestamp}.tar.gz"
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun SparseSizeDialog(
-    title: String,
-    message: String,
-    initialSize: Int,
-    onConfirm: (Int) -> Unit,
-    onDismiss: () -> Unit,
-    currentSize: Int? = null
+private fun SparseOperationDialog(
+    operation: SparseOperation,
+    onConfirm: (sizeGb: Int, customPath: String?) -> Unit,
+    onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    var sizeText by remember { mutableStateOf(initialSize.toString()) }
-    val size = sizeText.toIntOrNull()
-    val isOutOfRange = size == null || size !in 4..512
-    // The field opens pre-filled with the image's existing size, so confirming
-    // straight away would run a resize that resizes nothing.
-    val isSameSize = currentSize != null && size == currentSize
-    val isValid = !isOutOfRange && !isSameSize
+    val container = when (operation) {
+        is SparseOperation.Migrate -> operation.container
+        is SparseOperation.Resize -> operation.container
+        is SparseOperation.ConvertToDir -> operation.container
+    }
 
-    DsDialog(
-        onDismiss = onDismiss,
-        footer = {
-            DialogFooterRow(
-                dismissLabel = context.getString(R.string.cancel),
-                confirmLabel = context.getString(R.string.continue_button),
-                onDismiss = onDismiss,
-                onConfirm = { size?.let { onConfirm(it) } },
-                confirmEnabled = isValid
-            )
+    val defaultPath = remember(operation) {
+        when (operation) {
+            is SparseOperation.Migrate -> {
+                if (container.rootfsPath.endsWith(".img")) container.rootfsPath
+                else "${container.rootfsPath.removeSuffix("/")}.img"
+            }
+            is SparseOperation.ConvertToDir -> {
+                if (container.rootfsPath.endsWith(".img")) container.rootfsPath.removeSuffix(".img")
+                else "${container.rootfsPath}_dir"
+            }
+            is SparseOperation.Resize -> container.rootfsPath
         }
-    ) {
-            Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-            Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 
-            OutlinedTextField(
-                value = sizeText,
-                onValueChange = { if (it.isEmpty() || it.all { c -> c.isDigit() }) sizeText = it },
-                label = { Text(context.getString(R.string.size_gb)) },
-                placeholder = { Text(context.getString(R.string.size_range_4_512_hint)) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
-                colors = DsTextFieldDefaults.colors(),
-                isError = !isValid && sizeText.isNotEmpty(),
-                supportingText = {
-                    if (sizeText.isNotEmpty()) {
-                        if (isOutOfRange) {
-                            Text(context.getString(R.string.enter_size_between_4_512_gb))
-                        } else if (isSameSize) {
-                            Text(context.getString(R.string.resize_same_as_current, currentSize))
+    var customPath by remember { mutableStateOf(defaultPath) }
+    var detectedVolumes by remember { mutableStateOf<List<String>>(emptyList()) }
+    var sharedStoragePath by remember { mutableStateOf<String?>(null) }
+
+    var sizeText by remember { mutableStateOf((container.sparseImageSizeGB ?: 8).toString()) }
+    val size = sizeText.toIntOrNull()
+    val isSizeValid = size != null && size in 4..512
+
+    var freeSpaceGB by remember { mutableStateOf<Int?>(null) }
+    var fsReport by remember { mutableStateOf<FilesystemCapabilityReport?>(null) }
+
+    LaunchedEffect(Unit) {
+        detectedVolumes = StorageChecker.listStorageVolumes()
+        sharedStoragePath = StorageChecker.getSharedStoragePath()
+    }
+
+    LaunchedEffect(customPath, operation) {
+        if (customPath.isNotBlank()) {
+            val parentPath = if (customPath.endsWith(".img") || !customPath.endsWith("/")) {
+                java.io.File(customPath).parent ?: "/"
+            } else {
+                customPath
+            }
+            freeSpaceGB = StorageChecker.getFreeSpaceGB(parentPath)
+            if (operation is SparseOperation.ConvertToDir) {
+                fsReport = StorageChecker.inspectFilesystemCapabilities(parentPath, context)
+            }
+        }
+    }
+
+    val isPathValid = customPath.isNotBlank() && customPath.startsWith("/")
+    val canConfirm = when (operation) {
+        is SparseOperation.Migrate -> isSizeValid && isPathValid
+        is SparseOperation.Resize -> isSizeValid
+        is SparseOperation.ConvertToDir -> isPathValid
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .imePadding(),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+            tonalElevation = 0.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        tonalElevation = 0.dp
+                    ) {
+                        Box(modifier = Modifier.padding(10.dp)) {
+                            Icon(
+                                imageVector = when (operation) {
+                                    is SparseOperation.Migrate -> Icons.Default.Save
+                                    is SparseOperation.ConvertToDir -> Icons.Default.FolderOpen
+                                    is SparseOperation.Resize -> Icons.Default.AspectRatio
+                                },
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp)
+                            )
                         }
                     }
-                },
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                    Column {
+                        Text(
+                            text = when (operation) {
+                                is SparseOperation.Migrate -> "Convert to Sparse Image"
+                                is SparseOperation.ConvertToDir -> "Convert to Directory"
+                                is SparseOperation.Resize -> "Resize Sparse Image"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Text(
+                            text = "Container: ${container.name}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Text(
+                    text = when (operation) {
+                        is SparseOperation.Migrate -> "Pack directory rootfs into a standalone sparse ext4 image file."
+                        is SparseOperation.ConvertToDir -> "Unpack sparse ext4 image rootfs into a directory for native POSIX execution."
+                        is SparseOperation.Resize -> "Change the maximum virtual disk allocation for this sparse ext4 image."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            )
+
+                if (operation is SparseOperation.Migrate || operation is SparseOperation.Resize) {
+                    OutlinedTextField(
+                        value = sizeText,
+                        onValueChange = { if (it.isEmpty() || it.all { c -> c.isDigit() }) sizeText = it },
+                        label = { Text("Image Size (GB)") },
+                        placeholder = { Text(context.getString(R.string.size_range_4_512_hint)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = DsTextFieldDefaults.colors(),
+                        isError = !isSizeValid && sizeText.isNotEmpty(),
+                        supportingText = {
+                            if (!isSizeValid && sizeText.isNotEmpty()) {
+                                Text(context.getString(R.string.enter_size_between_4_512_gb))
+                            } else if (freeSpaceGB != null) {
+                                Text("Available storage: ~$freeSpaceGB GB free")
+                            }
+                        },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                        )
+                    )
+                }
+
+                if (operation is SparseOperation.Migrate || operation is SparseOperation.ConvertToDir) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = if (operation is SparseOperation.Migrate) "Destination Image Location" else "Destination Directory Location",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        StorageDestinationPicker(
+                            path = customPath,
+                            onPathChange = { customPath = it },
+                            label = if (operation is SparseOperation.Migrate) "Image file path" else "Target directory path",
+                            placeholder = if (operation is SparseOperation.Migrate) "/data/local/ubuntu/rootfs.img" else "/data/local/ubuntu/rootfs",
+                            colors = DsTextFieldDefaults.colors(),
+                            dialogTitle = if (operation is SparseOperation.Migrate) "Select Image Location" else "Select Target Location"
+                        )
+
+                        if (detectedVolumes.isNotEmpty() || sharedStoragePath != null) {
+                            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                sharedStoragePath?.let { shared ->
+                                    AssistChip(
+                                        onClick = {
+                                            customPath = if (operation is SparseOperation.Migrate) "$shared/Droidspaces/${container.name}/rootfs.img"
+                                            else "$shared/Droidspaces/${container.name}/rootfs"
+                                        },
+                                        label = { Text("This device's storage") },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Smartphone, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        }
+                                    )
+                                }
+                                detectedVolumes.forEach { volume ->
+                                    AssistChip(
+                                        onClick = {
+                                            customPath = if (operation is SparseOperation.Migrate) "$volume/Droidspaces/${container.name}/rootfs.img"
+                                            else "$volume/Droidspaces/${container.name}/rootfs"
+                                        },
+                                        label = { Text(volume.substringAfterLast("/")) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (operation is SparseOperation.ConvertToDir) {
+                    val report = fsReport
+                    if (report != null && !report.isFullyCompatibleWithDirectoryMode) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = "Filesystem Warning: ${report.fsType.uppercase()}",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                    Text(
+                                        text = "Destination filesystem may not support Linux POSIX permissions, symlinks, or special devices. Directory mode works best on internal storage or ext4/f2fs drives.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    } else if (report != null && report.isFullyCompatibleWithDirectoryMode) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF2E7D32).copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, Color(0xFF2E7D32).copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(18.dp))
+                                Text(
+                                    text = "Destination filesystem (${report.fsType}) supports directory mode ✓",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF2E7D32),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(context.getString(R.string.cancel))
+                    }
+
+                    Button(
+                        onClick = {
+                            val finalSize = size ?: 8
+                            val finalPath = customPath.trim().takeIf { it.isNotBlank() }
+                            onConfirm(finalSize, finalPath)
+                        },
+                        enabled = canConfirm,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            when (operation) {
+                                is SparseOperation.Migrate -> "Convert"
+                                is SparseOperation.ConvertToDir -> "Convert"
+                                is SparseOperation.Resize -> "Resize"
+                            }
+                        )
+                    }
+                }
+            }
+        }
     }
+}
+
+/** Local validation state for [MoveStorageDialog]'s custom path field. */
+private sealed class MoveStoragePathCheck {
+    data object Idle : MoveStoragePathCheck()
+    data object Checking : MoveStoragePathCheck()
+    data object Valid : MoveStoragePathCheck()
+    data class Invalid(val reason: String) : MoveStoragePathCheck()
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun MoveStorageDialog(
+    container: com.droidspaces.app.util.ContainerInfo,
+    onConfirm: (newPath: String?, verificationMethod: com.droidspaces.app.util.MoveVerificationMethod, skipFreeSpaceCheck: Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val dialogShape = RoundedCornerShape(24.dp)
+    val currentDir = container.rootfsPath.substringBeforeLast("/", "")
+    var useCustomLocation by remember { mutableStateOf(false) }
+    var verificationMethod by remember { mutableStateOf(com.droidspaces.app.util.MoveVerificationMethod.SHA256) }
+    var skipFreeSpaceCheck by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var customPath by remember { mutableStateOf("") }
+    var detectedVolumes by remember { mutableStateOf<List<String>>(emptyList()) }
+    var sharedStoragePath by remember { mutableStateOf<String?>(null) }
+    var pathCheck by remember { mutableStateOf<MoveStoragePathCheck>(MoveStoragePathCheck.Idle) }
+
+    LaunchedEffect(Unit) {
+        detectedVolumes = com.droidspaces.app.util.StorageChecker.listStorageVolumes()
+        sharedStoragePath = com.droidspaces.app.util.StorageChecker.getSharedStoragePath()
     }
+
+    LaunchedEffect(customPath, useCustomLocation) {
+        if (!useCustomLocation || customPath.trim().isEmpty()) {
+            pathCheck = MoveStoragePathCheck.Idle
+            return@LaunchedEffect
+        }
+        pathCheck = MoveStoragePathCheck.Checking
+        kotlinx.coroutines.delay(500)
+        val result = com.droidspaces.app.util.StorageChecker.validateWritablePath(customPath.trim())
+        pathCheck = if (result.isSuccess) {
+            if (!container.useSparseImage) {
+                val report = com.droidspaces.app.util.StorageChecker.inspectFilesystemCapabilities(customPath.trim(), context)
+                if (!report.isFullyCompatibleWithDirectoryMode) {
+                    MoveStoragePathCheck.Invalid("Incompatible '${report.fsType}' filesystem. Directory mode requires POSIX ext4/f2fs. Migrate container to sparse image first.")
+                } else {
+                    MoveStoragePathCheck.Valid
+                }
+            } else {
+                MoveStoragePathCheck.Valid
+            }
+        } else {
+            MoveStoragePathCheck.Invalid(result.exceptionOrNull()?.message ?: "Can't write to this path")
+        }
+    }
+
+    val isValid = !useCustomLocation ||
+        (customPath.trim().isNotEmpty() && pathCheck !is MoveStoragePathCheck.Invalid)
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .imePadding(),
+            shape = dialogShape,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+            tonalElevation = 0.dp
+        ) {
+            Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Move Storage", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "Move \"${container.name}\"'s data to a different location. The container will be stopped first if it's running.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Current location: $currentDir",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+
+                if (!container.useSparseImage) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+                    ) {
+                        Text(
+                            "This container uses directory-mode rootfs. Moving it to a FAT32/exFAT SD card or USB drive will break it -- only move it to another ext4/f2fs-formatted location.",
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = !useCustomLocation, onClick = { useCustomLocation = false })
+                    Text("Internal storage (default)", style = MaterialTheme.typography.bodyMedium)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = useCustomLocation, onClick = { useCustomLocation = true })
+                    Text("External / custom location", style = MaterialTheme.typography.bodyMedium)
+                }
+
+                if (useCustomLocation) {
+                    StorageDestinationPicker(
+                        path = customPath,
+                        onPathChange = { customPath = it },
+                        placeholder = "/storage/1234-5678/Droidspaces",
+                        isError = pathCheck is MoveStoragePathCheck.Invalid,
+                        trailingStatusIcon = {
+                            when (pathCheck) {
+                                is MoveStoragePathCheck.Checking -> CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                is MoveStoragePathCheck.Valid -> Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                is MoveStoragePathCheck.Invalid -> Icon(
+                                    Icons.Default.Error,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                                else -> {}
+                            }
+                        },
+                        colors = DsTextFieldDefaults.colors(),
+                        dialogTitle = "Select Storage Location"
+                    )
+
+                    if (detectedVolumes.isNotEmpty() || sharedStoragePath != null) {
+                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            sharedStoragePath?.let { shared ->
+                                AssistChip(
+                                    onClick = { customPath = "$shared/Droidspaces" },
+                                    label = { Text("This device's storage") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Smartphone, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    }
+                                )
+                            }
+                            detectedVolumes.forEach { volume ->
+                                AssistChip(
+                                    onClick = { customPath = "$volume/Droidspaces" },
+                                    label = { Text(volume.substringAfterLast("/")) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "Verify copy before deleting original",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        when (verificationMethod) {
+                            MoveVerificationMethod.SIZE ->
+                                "Fastest -- compares sizes only. Won't catch a corrupted file that's the same size."
+                            MoveVerificationMethod.SHA256 ->
+                                "Most thorough -- hashes every line/file individually and can point to exactly which one differs."
+                            MoveVerificationMethod.TAR ->
+                                "Balanced -- hashes all file contents in one pass. Much faster than per-file hashing, but can't name which file differs."
+                            MoveVerificationMethod.NONE ->
+                                "Skipped -- only trusts the copy command's own exit code. Not recommended."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    DsDropdown(
+                        label = "Verification Method",
+                        selected = verificationMethod,
+                        options = MoveVerificationMethod.entries,
+                        displayName = { method ->
+                            when (method) {
+                                MoveVerificationMethod.SIZE -> "Size only"
+                                MoveVerificationMethod.SHA256 -> "Checksum (per line)"
+                                MoveVerificationMethod.TAR -> "Checksum (combined)"
+                                MoveVerificationMethod.NONE -> "None"
+                            }
+                        },
+                        onSelect = { verificationMethod = it }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { skipFreeSpaceCheck = !skipFreeSpaceCheck }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Checkbox(
+                        checked = skipFreeSpaceCheck,
+                        onCheckedChange = { skipFreeSpaceCheck = it }
+                    )
+                    Column {
+                        Text("Skip Free-Space Check", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Text("Bypass capacity precheck if destination reports inaccurate free space.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f))
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).clickable(onClick = onDismiss),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                        tonalElevation = 0.dp
+                    ) {
+                        Box(modifier = Modifier.padding(14.dp), contentAlignment = Alignment.Center) {
+                            Text("Cancel", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).clickable(
+                            enabled = isValid,
+                            onClick = { onConfirm(if (useCustomLocation) customPath.trim() else null, verificationMethod, skipFreeSpaceCheck) }
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (isValid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                        tonalElevation = 0.dp
+                    ) {
+                        Box(modifier = Modifier.padding(14.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                "Move",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isValid) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RepairAndCompactDialog(
+    container: ContainerInfo,
+    diskUsage: ContainerDiskUsageManager.DiskUsage?,
+    onConfirm: (runFstrim: Boolean, compactToUtilized: Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val dialogShape = RoundedCornerShape(24.dp)
+    var runFstrim by remember { mutableStateOf(true) }
+    var compactToUtilized by remember { mutableStateOf(false) }
+
+    val utilizedText = diskUsage?.let {
+        MoveStorageOperations.formatBytes(it.usedBytes)
+    } ?: "utilized size"
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .imePadding(),
+            shape = dialogShape,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+            tonalElevation = 0.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Build,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Text(
+                        "Repair & Compact Image",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                }
+
+                Text(
+                    "Check filesystem integrity with e2fsck, zero-out unused blocks, and compact the sparse rootfs image for \"${container.name}\".",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                if (diskUsage != null) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    "Physical Disk Footprint",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    MoveStorageOperations.formatBytes(diskUsage.usedBytes),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    "Apparent Capacity",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    MoveStorageOperations.formatBytes(diskUsage.totalBytes),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (container.isRunning) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                "The container will be temporarily stopped to safely perform offline filesystem maintenance and restarted automatically.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { runFstrim = !runFstrim }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Checkbox(
+                        checked = runFstrim,
+                        onCheckedChange = { runFstrim = it }
+                    )
+                    Column {
+                        Text(
+                            "Run fstrim",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "Discard and zero-out freed filesystem blocks to maximize reclaimed space",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { compactToUtilized = !compactToUtilized }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Checkbox(
+                        checked = compactToUtilized,
+                        onCheckedChange = { compactToUtilized = it }
+                    )
+                    Column {
+                        Text(
+                            "Compact image capacity to utilized size ($utilizedText)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "Shrink virtual image capacity down to match current actual content",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(50))
+                            .clickable(onClick = onDismiss),
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        tonalElevation = 0.dp
+                    ) {
+                        Box(modifier = Modifier.padding(14.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                "Cancel",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(50))
+                            .clickable(onClick = { onConfirm(runFstrim, compactToUtilized) }),
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.primary,
+                        tonalElevation = 0.dp
+                    ) {
+                        Box(modifier = Modifier.padding(14.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                "Repair & Compact",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 
 @Composable

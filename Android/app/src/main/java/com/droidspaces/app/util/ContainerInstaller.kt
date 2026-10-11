@@ -360,7 +360,7 @@ object ContainerInstaller {
     /**
      * Apply post-extraction fixes to the rootfs (both sparse and directory modes).
      */
-    private suspend fun applyPostExtractionFixes(
+    suspend fun applyPostExtractionFixes(
         context: Context,
         rootfsPath: String,
         logger: ContainerLogger

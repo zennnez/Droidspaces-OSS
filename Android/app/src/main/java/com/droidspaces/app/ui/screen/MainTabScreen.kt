@@ -76,6 +76,7 @@ fun MainTabScreen(
     onNavigateToEditContainer: (String) -> Unit = {},
     onNavigateToContainerDetails: (String) -> Unit = {},
     onNavigateToTerminal: (String) -> Unit = {},
+    onNavigateToSnapshots: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -344,6 +345,7 @@ fun MainTabScreen(
                             onNavigateToInstallation = onNavigateToContainerInstallation,
                             onNavigateToEditContainer = onNavigateToEditContainer,
                             onNavigateToContainerDetails = onNavigateToContainerDetails,
+                            onNavigateToSnapshots = onNavigateToSnapshots,
                             containerViewModel = containerViewModel,
                             onRefresh = { performRefresh(TabItem.Containers) },
                             expandedContainerName = expandedContainerName,
@@ -576,6 +578,7 @@ private fun ContainersTabContent(
     onNavigateToInstallation: (android.net.Uri) -> Unit,
     onNavigateToEditContainer: (String) -> Unit,
     onNavigateToContainerDetails: (String) -> Unit,
+    onNavigateToSnapshots: (String) -> Unit = {},
     containerViewModel: ContainerViewModel,
     onRefresh: suspend () -> Unit,
     expandedContainerName: String?,
@@ -590,6 +593,7 @@ private fun ContainersTabContent(
             onNavigateToInstallation = onNavigateToInstallation,
             onNavigateToEditContainer = onNavigateToEditContainer,
             onNavigateToContainerDetails = onNavigateToContainerDetails,
+            onNavigateToSnapshots = onNavigateToSnapshots,
             containerViewModel = containerViewModel,
             expandedContainerName = expandedContainerName,
             onExpandedContainerNameChange = onExpandedContainerNameChange,
