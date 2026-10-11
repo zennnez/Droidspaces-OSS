@@ -796,6 +796,13 @@ void ds_cgroup_apply_limits(struct ds_config *cfg) {
   char val[64], quota[32], period[32];
 
   if (cfg->memory_limit) {
+    /* Set memory.high (soft throttle / proactive background reclaim) at 85% of memory.max
+     * to prevent sudden OOM-killer panics and kernel page thrash */
+    long long mem_high = (cfg->memory_limit * 85) / 100;
+    char val_high[64];
+    snprintf(val_high, sizeof(val_high), "%lld", mem_high);
+    (void)apply_limit(cfg, "memory", "memory.high", val_high, NULL, NULL, NULL);
+
     snprintf(val, sizeof(val), "%lld", cfg->memory_limit);
     if (!apply_limit(cfg, "memory", "memory.max", val, "memory.limit_in_bytes",
                      val,
